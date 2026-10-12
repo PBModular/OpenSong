@@ -1,0 +1,29 @@
+info:
+  name: OpenSong
+  author: Ultra119
+  version: "1.0.0"
+  description: "Sends daily random songs from Spotify downloaded via YouTube with community voting, approval flow, and customizable settings"
+  auto_load: true
+
+permissions:
+  - require_db
+
+config:
+  approver_username: "Ultra119"
+  target_chat_id: null
+  interval_hours: 24
+  pin_song: true
+  require_approval: true
+  genres:
+    - pop
+    - rock
+    - electronic
+    - hip-hop
+    - indie
+    - jazz
+    - metal
+    - r-n-b
+    - classical
+    - synthwave
+  spotify_client_id: ""
+  spotify_client_secret: ""

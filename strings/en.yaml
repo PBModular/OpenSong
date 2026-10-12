@@ -1,0 +1,101 @@
+help: |
+  <b>OpenSong Module</b>
+  Automatically discovers random songs on Spotify, downloads audio via YouTube, and posts them to the chat on a schedule with Like/Dislike voting and optional DM approval.
+
+  <b>Commands:</b>
+  • <code>/opensong</code> — Settings menu
+  • <code>/opensong_send</code> — Send a random song now
+  • <code>/opensong_approver @username</code> — Change approver username
+
+settings:
+  title: "<b>OpenSong Settings — {chat_title}</b>"
+  info: |
+    <b>OpenSong Settings — {chat_title}</b>
+
+    <b>Auto-Send:</b> {status_text}
+    <b>Interval:</b> Every {interval}h
+    <b>Next song:</b> {next_run}
+    <b>Pin message:</b> {pin_text}
+    <b>DM approval:</b> {approval_text}
+    <b>Approver:</b> @{approver}
+    <b>Genres:</b> {genres_count}/{total_genres} selected
+  enabled: Enabled
+  disabled: Disabled
+  enabled_short: On
+  disabled_short: Off
+  interval_header: |
+    <b>Interval Settings</b>
+    Current schedule: every {interval}h.
+
+    Choose how often to send a song:
+  genres_header: |
+    <b>Genre Settings</b>
+    Selected {enabled_count} of {total_count} available:
+  approver_header: |
+    <b>DM Approval Settings</b>
+    Current approver: @{approver}
+
+    When approval is enabled, the bot sends preview audio to the approver's DM before publishing to the chat.
+    (The approver must have started the bot via /start)
+  btn_interval: "Interval: {interval}h"
+  btn_pin: "Pin: {status}"
+  btn_approval: "Approval: {status}"
+  btn_status: "Auto-Send: {status}"
+  btn_genres: "Genres ({count})"
+  btn_approver: "Approver: @{user}"
+  btn_send_now: "Send now"
+  btn_refresh: "Refresh 🔄"
+  btn_close: "Close"
+  btn_back: "← Back"
+  btn_enable_all: "Enable all"
+  btn_disable_all: "Disable all"
+  btn_set_me: "Set me as approver"
+  btn_reset_default: "Reset to default"
+  prev_btn: "← Back"
+  next_btn: "Next →"
+  hours_suffix: "h"
+  saved: "Settings updated."
+  no_permission: "Only chat administrators can modify OpenSong settings."
+  min_genres_error: "At least one genre must remain selected."
+  closed: "Settings closed."
+
+song_message:
+  caption: |
+    <b>Song of the Day</b>
+
+    <b>Title:</b> {title}
+    <b>Artist:</b> {artist}
+    <b>Genre:</b> #{genre}
+
+    <a href="{spotify_url}">Listen on Spotify</a>
+  vote_liked: "You liked this song."
+  vote_disliked: "You disliked this song."
+  vote_removed: "Vote removed."
+  vote_switched: "Vote updated."
+
+approval:
+  caption: |
+    <b>Song Approval Request</b>
+
+    <b>Title:</b> {title}
+    <b>Artist:</b> {artist}
+    <b>Genre:</b> #{genre}
+    <b>Target chat:</b> {chat_title}
+
+    <a href="{spotify_url}">Spotify Link</a>
+  btn_approve: "Approve"
+  btn_reject: "Reject"
+  btn_reroll: "Reroll 🔄"
+  approved: "<b>Approved by @{user}.</b> Song published to <b>{chat_title}</b>."
+  rejected: "<b>Rejected by @{user}.</b> Song discarded."
+  rerolling: "Searching for another track..."
+  not_approver: "Only @{approver} can decide on this song."
+
+actions:
+  searching: "Searching Spotify and downloading audio from YouTube..."
+  sent_success: "Song sent successfully."
+  sent_approval: "Song sent to @{approver} for DM approval."
+  send_error: "Failed to fetch or download song. Check logs."
+  approver_dm_error: "Could not DM @{approver} (user has not started bot). Song sent directly to chat."
+  approver_updated: "Approver updated to @{user}."
+  approver_invalid: "Provide a valid username, e.g.: /opensong_approver @username"

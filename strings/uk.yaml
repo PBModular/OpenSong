@@ -1,0 +1,101 @@
+help: |
+  <b>Модуль OpenSong</b>
+  Пошук випадкових пісень у Spotify, завантаження аудіо з YouTube та надсилання в чат за розкладом із голосуванням і можливістю схвалення в ПП.
+
+  <b>Команди:</b>
+  • <code>/opensong</code> — Меню налаштувань
+  • <code>/opensong_send</code> — Надіслати випадкову пісню зараз
+  • <code>/opensong_approver @username</code> — Змінити користувача для схвалення
+
+settings:
+  title: "<b>Налаштування OpenSong — {chat_title}</b>"
+  info: |
+    <b>Налаштування OpenSong — {chat_title}</b>
+
+    <b>Авто-надсилання:</b> {status_text}
+    <b>Інтервал:</b> Кожні {interval} год
+    <b>Наступна пісня:</b> {next_run}
+    <b>Закріплення:</b> {pin_text}
+    <b>Схвалення в ПП:</b> {approval_text}
+    <b>Хто схвалює:</b> @{approver}
+    <b>Жанри:</b> {genres_count}/{total_genres} обрано
+  enabled: Увімкнено
+  disabled: Вимкнено
+  enabled_short: Увімк.
+  disabled_short: Вимк.
+  interval_header: |
+    <b>Налаштування інтервалу</b>
+    Поточний: кожні {interval} год.
+
+    Оберіть, як часто надсилати пісню:
+  genres_header: |
+    <b>Налаштування жанрів</b>
+    Обрано {enabled_count} з {total_count} доступних:
+  approver_header: |
+    <b>Схвалення пісень у ПП</b>
+    Поточний користувач: @{approver}
+
+    Якщо схвалення увімкнено, бот надсилає аудіо в ПП користувачу перед публікацією в чат.
+    (Користувач має хоча б раз запустити бота через /start)
+  btn_interval: "Інтервал: {interval} год"
+  btn_pin: "Закріплення: {status}"
+  btn_approval: "Схвалення: {status}"
+  btn_status: "Авто-надсилання: {status}"
+  btn_genres: "Жанри ({count})"
+  btn_approver: "Схвалює: @{user}"
+  btn_send_now: "Надіслати зараз"
+  btn_refresh: "Оновити 🔄"
+  btn_close: "Закрити"
+  btn_back: "← Назад"
+  btn_enable_all: "Увімкнути всі"
+  btn_disable_all: "Вимкнути всі"
+  btn_set_me: "Призначити мене"
+  btn_reset_default: "Скинути до конфігурації"
+  prev_btn: "← Назад"
+  next_btn: "Далі →"
+  hours_suffix: "год"
+  saved: "Налаштування збережено."
+  no_permission: "Тільки адміністратори чату можуть змінювати налаштування."
+  min_genres_error: "Має бути обрано хоча б один жанр."
+  closed: "Налаштування закрито."
+
+song_message:
+  caption: |
+    <b>Пісня дня</b>
+
+    <b>Назва:</b> {title}
+    <b>Виконавець:</b> {artist}
+    <b>Жанр:</b> #{genre}
+
+    <a href="{spotify_url}">Слухати в Spotify</a>
+  vote_liked: "Вам сподобалася пісня."
+  vote_disliked: "Вам не сподобалася пісня."
+  vote_removed: "Голос скасовано."
+  vote_switched: "Голос змінено."
+
+approval:
+  caption: |
+    <b>Запит на схвалення пісні</b>
+
+    <b>Назва:</b> {title}
+    <b>Виконавець:</b> {artist}
+    <b>Жанр:</b> #{genre}
+    <b>Цільовий чат:</b> {chat_title}
+
+    <a href="{spotify_url}">Посилання на Spotify</a>
+  btn_approve: "Схвалити"
+  btn_reject: "Відхилити"
+  btn_reroll: "Інша пісня 🔄"
+  approved: "<b>Схвалено @{user}.</b> Пісню опубліковано в <b>{chat_title}</b>."
+  rejected: "<b>Відхилено @{user}.</b> Пісню відхилено."
+  rerolling: "Шукаємо іншу пісню..."
+  not_approver: "Тільки @{approver} може ухвалити рішення щодо цієї пісні."
+
+actions:
+  searching: "Пошук пісні в Spotify та завантаження з YouTube..."
+  sent_success: "Пісню успішно надіслано."
+  sent_approval: "Пісню надіслано @{approver} на схвалення в ПП."
+  send_error: "Не вдалося завантажити пісню. Перевірте логи."
+  approver_dm_error: "Не вдалося написати в ПП @{approver} (користувач не запустив бота). Пісню надіслано напряму в чат."
+  approver_updated: "Користувача для схвалення змінено на @{user}."
+  approver_invalid: "Вкажіть юзернейм, наприклад: /opensong_approver @username"

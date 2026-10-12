@@ -1,0 +1,101 @@
+help: |
+  <b>Модуль OpenSong</b>
+  Поиск случайных треков в Spotify, скачивание аудио с YouTube и отправка в чат по расписанию с голосованием и возможностью подтверждения в ЛС.
+
+  <b>Команды:</b>
+  • <code>/opensong</code> — Меню настроек
+  • <code>/opensong_send</code> — Отправить случайную песню сейчас
+  • <code>/opensong_approver @username</code> — Изменить пользователя для подтверждения
+
+settings:
+  title: "<b>Настройки OpenSong — {chat_title}</b>"
+  info: |
+    <b>Настройки OpenSong — {chat_title}</b>
+
+    <b>Авто-отправка:</b> {status_text}
+    <b>Интервал:</b> Каждые {interval} ч
+    <b>Следующий трек:</b> {next_run}
+    <b>Закрепление:</b> {pin_text}
+    <b>Подтверждение в ЛС:</b> {approval_text}
+    <b>Кто подтверждает:</b> @{approver}
+    <b>Жанры:</b> {genres_count}/{total_genres} выбрано
+  enabled: Включено
+  disabled: Выключено
+  enabled_short: Вкл.
+  disabled_short: Выкл.
+  interval_header: |
+    <b>Настройка интервала</b>
+    Текущий: каждые {interval} ч.
+
+    Выберите, как часто отправлять трек:
+  genres_header: |
+    <b>Настройка жанров</b>
+    Выбрано {enabled_count} из {total_count} доступных:
+  approver_header: |
+    <b>Подтверждение треков в ЛС</b>
+    Текущий пользователь: @{approver}
+
+    Если подтверждение включено, бот отправляет аудио в ЛС пользователю перед публикацией в чат.
+    (Пользователь должен хотя бы раз запустить бота через /start)
+  btn_interval: "Интервал: {interval} ч"
+  btn_pin: "Закрепление: {status}"
+  btn_approval: "Подтверждение: {status}"
+  btn_status: "Авто-отправка: {status}"
+  btn_genres: "Жанры ({count})"
+  btn_approver: "Проверяет: @{user}"
+  btn_send_now: "Отправить сейчас"
+  btn_refresh: "Обновить 🔄"
+  btn_close: "Закрыть"
+  btn_back: "← Назад"
+  btn_enable_all: "Включить все"
+  btn_disable_all: "Выключить все"
+  btn_set_me: "Назначить меня"
+  btn_reset_default: "Сбросить к конфигу"
+  prev_btn: "← Назад"
+  next_btn: "Далее →"
+  hours_suffix: "ч"
+  saved: "Настройки сохранены."
+  no_permission: "Только администраторы чата могут менять настройки."
+  min_genres_error: "Должен быть выбран хотя бы один жанр."
+  closed: "Настройки закрыты."
+
+song_message:
+  caption: |
+    <b>Песня дня</b>
+
+    <b>Название:</b> {title}
+    <b>Исполнитель:</b> {artist}
+    <b>Жанр:</b> #{genre}
+
+    <a href="{spotify_url}">Слушать в Spotify</a>
+  vote_liked: "Вам понравился трек."
+  vote_disliked: "Вам не понравился трек."
+  vote_removed: "Голос отменен."
+  vote_switched: "Голос изменен."
+
+approval:
+  caption: |
+    <b>Запрос на подтверждение трека</b>
+
+    <b>Название:</b> {title}
+    <b>Исполнитель:</b> {artist}
+    <b>Жанр:</b> #{genre}
+    <b>Целевой чат:</b> {chat_title}
+
+    <a href="{spotify_url}">Ссылка на Spotify</a>
+  btn_approve: "Одобрить"
+  btn_reject: "Отклонить"
+  btn_reroll: "Другой трек 🔄"
+  approved: "<b>Одобрено @{user}.</b> Трек отправлен в <b>{chat_title}</b>."
+  rejected: "<b>Отклонено @{user}.</b> Трек отклонен."
+  rerolling: "Ищем другой трек..."
+  not_approver: "Только @{approver} может одобрить этот трек."
+
+actions:
+  searching: "Поиск трека в Spotify и скачивание с YouTube..."
+  sent_success: "Трек успешно отправлен."
+  sent_approval: "Трек отправлен @{approver} на подтверждение в ЛС."
+  send_error: "Не удалось скачать трек. Проверьте логи."
+  approver_dm_error: "Не удалось написать в ЛС @{approver} (пользователь не запустил бота). Трек отправлен напрямую в чат."
+  approver_updated: "Ответственный за подтверждение изменен на @{user}."
+  approver_invalid: "Укажите юзернейм, например: /opensong_approver @username"
