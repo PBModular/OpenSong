@@ -13,6 +13,7 @@ from pyrogram.types import (
     CallbackQuery,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
+    InputMediaAudio,
 )
 from sqlalchemy import select, func, delete, case, text
 
@@ -1009,24 +1010,42 @@ class OpenSongModule(BaseModule):
                 markup = self._build_player_markup(chat_id)
                 caption = self._build_player_caption(track, session.current_index, len(session.history))
 
-                old_msg_id = session.message_id or call.message.id
+                target_msg_id = session.message_id or call.message.id
                 try:
-                    sent_msg = await self.bot.send_audio(
+                    edited_msg = await self.bot.edit_message_media(
                         chat_id=chat_id,
-                        audio=track.file_id,
-                        caption=caption,
-                        duration=track.duration,
-                        performer=track.artist,
-                        title=track.title,
+                        message_id=target_msg_id,
+                        media=InputMediaAudio(
+                            media=track.file_id,
+                            caption=caption,
+                            duration=track.duration,
+                            performer=track.artist,
+                            title=track.title,
+                        ),
                         reply_markup=markup,
                     )
-                    session.message_id = sent_msg.id
-                    try:
-                        await self.bot.delete_messages(chat_id, old_msg_id)
-                    except Exception:
-                        pass
+                    if edited_msg and edited_msg.audio:
+                        track.file_id = edited_msg.audio.file_id
+                    session.message_id = edited_msg.id
                 except Exception as e:
-                    self.logger.error("Failed to navigate back in player: %s", e)
+                    self.logger.warning("Failed to edit player media for prev, falling back to resend: %s", e)
+                    try:
+                        sent_msg = await self.bot.send_audio(
+                            chat_id=chat_id,
+                            audio=track.file_id,
+                            caption=caption,
+                            duration=track.duration,
+                            performer=track.artist,
+                            title=track.title,
+                            reply_markup=markup,
+                        )
+                        session.message_id = sent_msg.id
+                        try:
+                            await self.bot.delete_messages(chat_id, target_msg_id)
+                        except Exception:
+                            pass
+                    except Exception as resend_err:
+                        self.logger.error("Failed to resend audio for prev: %s", resend_err)
                 await call.answer()
             return
 
@@ -1045,24 +1064,42 @@ class OpenSongModule(BaseModule):
                     markup = self._build_player_markup(chat_id)
                     caption = self._build_player_caption(track, session.current_index, len(session.history))
 
-                    old_msg_id = session.message_id or call.message.id
+                    target_msg_id = session.message_id or call.message.id
                     try:
-                        sent_msg = await self.bot.send_audio(
+                        edited_msg = await self.bot.edit_message_media(
                             chat_id=chat_id,
-                            audio=track.file_id,
-                            caption=caption,
-                            duration=track.duration,
-                            performer=track.artist,
-                            title=track.title,
+                            message_id=target_msg_id,
+                            media=InputMediaAudio(
+                                media=track.file_id,
+                                caption=caption,
+                                duration=track.duration,
+                                performer=track.artist,
+                                title=track.title,
+                            ),
                             reply_markup=markup,
                         )
-                        session.message_id = sent_msg.id
-                        try:
-                            await self.bot.delete_messages(chat_id, old_msg_id)
-                        except Exception:
-                            pass
+                        if edited_msg and edited_msg.audio:
+                            track.file_id = edited_msg.audio.file_id
+                        session.message_id = edited_msg.id
                     except Exception as e:
-                        self.logger.error("Failed to navigate forward in player history: %s", e)
+                        self.logger.warning("Failed to edit player media for next history, falling back to resend: %s", e)
+                        try:
+                            sent_msg = await self.bot.send_audio(
+                                chat_id=chat_id,
+                                audio=track.file_id,
+                                caption=caption,
+                                duration=track.duration,
+                                performer=track.artist,
+                                title=track.title,
+                                reply_markup=markup,
+                            )
+                            session.message_id = sent_msg.id
+                            try:
+                                await self.bot.delete_messages(chat_id, target_msg_id)
+                            except Exception:
+                                pass
+                        except Exception as resend_err:
+                            self.logger.error("Failed to resend audio for next history: %s", resend_err)
                     await call.answer()
                 return
 
@@ -1105,27 +1142,51 @@ class OpenSongModule(BaseModule):
                 markup = self._build_player_markup(chat_id)
                 caption = self._build_player_caption(new_track, session.current_index, len(session.history))
 
-                old_msg_id = session.message_id or call.message.id
+                target_msg_id = session.message_id or call.message.id
+                thumb_path = (
+                    downloaded.cover_path
+                    if downloaded.cover_path and os.path.exists(downloaded.cover_path)
+                    else None
+                )
                 try:
-                    sent_msg = await self.bot.send_audio(
+                    edited_msg = await self.bot.edit_message_media(
                         chat_id=chat_id,
-                        audio=downloaded.audio_path,
-                        caption=caption,
-                        duration=new_track.duration,
-                        performer=new_track.artist,
-                        title=new_track.title,
-                        thumb=downloaded.cover_path if downloaded.cover_path and os.path.exists(downloaded.cover_path) else None,
+                        message_id=target_msg_id,
+                        media=InputMediaAudio(
+                            media=downloaded.audio_path,
+                            thumb=thumb_path,
+                            caption=caption,
+                            duration=new_track.duration,
+                            performer=new_track.artist,
+                            title=new_track.title,
+                        ),
                         reply_markup=markup,
                     )
-                    if sent_msg.audio:
-                        new_track.file_id = sent_msg.audio.file_id
-                    session.message_id = sent_msg.id
-                    try:
-                        await self.bot.delete_messages(chat_id, old_msg_id)
-                    except Exception:
-                        pass
+                    if edited_msg and edited_msg.audio:
+                        new_track.file_id = edited_msg.audio.file_id
+                    session.message_id = edited_msg.id
                 except Exception as e:
-                    self.logger.error("Failed to send next player audio: %s", e)
+                    self.logger.warning("Failed to edit player media for new track, falling back to resend: %s", e)
+                    try:
+                        sent_msg = await self.bot.send_audio(
+                            chat_id=chat_id,
+                            audio=downloaded.audio_path,
+                            caption=caption,
+                            duration=new_track.duration,
+                            performer=new_track.artist,
+                            title=new_track.title,
+                            thumb=thumb_path,
+                            reply_markup=markup,
+                        )
+                        if sent_msg.audio:
+                            new_track.file_id = sent_msg.audio.file_id
+                        session.message_id = sent_msg.id
+                        try:
+                            await self.bot.delete_messages(chat_id, target_msg_id)
+                        except Exception:
+                            pass
+                    except Exception as resend_err:
+                        self.logger.error("Failed to resend audio for new track: %s", resend_err)
                 finally:
                     self.downloader.cleanup_files(downloaded.audio_path, downloaded.cover_path)
 
