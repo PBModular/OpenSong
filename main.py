@@ -907,8 +907,24 @@ class OpenSongModule(BaseModule):
             settings = await self._get_or_create_settings(chat_id)
             genres = settings.get_genres_list()
 
-            # 1. Search in Spotify
-            track_info: Optional[TrackInfo] = await self.spotify.get_random_song(genres)
+            # Query recently posted songs in this chat (last 60 days) to avoid repeats
+            exclude_titles = set()
+            try:
+                async with self.db.session_maker() as session:
+                    cutoff = time.time() - (60 * 86400)
+                    recent_posts = await session.scalars(
+                        select(SongPost.title).where(
+                            SongPost.chat_id == chat_id, SongPost.posted_at >= cutoff
+                        )
+                    )
+                    exclude_titles = {t.lower().strip() for t in recent_posts.all() if t}
+            except Exception as e:
+                self.logger.warning("Could not fetch recent post history for duplicate filtering: %s", e)
+
+            # 1. Search in Spotify with history exclusion
+            track_info: Optional[TrackInfo] = await self.spotify.get_random_song(
+                genres, exclude_titles=exclude_titles
+            )
             if not track_info:
                 self.logger.error("Could not obtain any song for genres: %s", genres)
                 return False, "spotify_failed"

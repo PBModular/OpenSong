@@ -4,7 +4,7 @@ import logging
 import random
 import re
 from dataclasses import dataclass
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Set
 import aiohttp
 
 logger = logging.getLogger(__name__)
@@ -20,58 +20,90 @@ class TrackInfo:
     genre: str
 
 
-# Pre-mapped official Spotify playlists for genre random track discovery (no API keys required)
-GENRE_PLAYLISTS: Dict[str, str] = {
-    "pop": "37i9dQZF1DXcBWIGoYBM5M",         # Today's Top Hits
-    "rock": "37i9dQZF1DWXRqgorJj26U",        # Rock Classics
-    "hip-hop": "37i9dQZF1DX0XUsuxWHRQd",     # RapCaviar
-    "electronic": "37i9dQZF1DX4dyzvuaRJ0n",  # mint
-    "indie": "37i9dQZF1DX2Nc3B70tvx0",       # Ultimate Indie
-    "jazz": "37i9dQZF1DXbITWG1ZJKYt",        # Jazz Classics
-    "metal": "37i9dQZF1DX9qNs32fujYe",       # Heavy Metal
-    "r-n-b": "37i9dQZF1DX4Y4RhrZqHhr",       # R&B Classics
-    "classical": "37i9dQZF1DWWEJlAGA9gs0",   # Classical Essentials
-    "synthwave": "37i9dQZF1DXdLEN7aqioXM",   # RetroWave / Outrun
-    "blues": "37i9dQZF1DXd9rSDyQguIk",       # Blues Classics
-    "country": "37i9dQZF1DX1lVhptIYRda",     # Hot Country
-    "folk": "37i9dQZF1DXaUDcU6KDCj4",        # Folk & Acoustic
-    "reggae": "37i9dQZF1DXbSbnqxMTGx9",      # Reggae Classics
-    "disco": "37i9dQZF1DXaXB8fQg7xif",       # Disco Fever
-    "ambient": "37i9dQZF1DX3Ogo9pFvBkY",     # Ambient Relaxation
-    "lo-fi": "37i9dQZF1DX8Uebhn9wzrS",       # Chill Lofi Study Beats
-    "k-pop": "37i9dQZF1DX9tPFwDMOaN1",       # K-Pop ON!
+# Multi-playlist pools per genre to guarantee large variety across hundreds/thousands of tracks
+GENRE_PLAYLISTS: Dict[str, List[str]] = {
+    "pop": [
+        "37i9dQZF1DXcBWIGoYBM5M",  # Today's Top Hits
+        "37i9dQZF1DX4UtSsGT1Sbe",  # All Out 80s
+        "37i9dQZF1DXbTxeAdrVG2l",  # All Out 90s
+        "37i9dQZF1DXbYM3nMMSAfg",  # Pop Rising
+        "37i9dQZF1DX0b1W992W6fV",  # Hit Rewind
+    ],
+    "rock": [
+        "37i9dQZF1DWXRqgorJj26U",  # Rock Classics
+        "37i9dQZF1DWZryfp6NSvtz",  # All New Rock
+        "37i9dQZF1DX1rVvRgjXZwF",  # 00s Rock Anthems
+        "37i9dQZF1DX8FwnYE6PRS3",  # Modern Rock
+        "37i9dQZF1DX3oM43CtKnRV",  # Hard Rock
+    ],
+    "electronic": [
+        "37i9dQZF1DX4dyzvuaRJ0n",  # mint
+        "37i9dQZF1DX8tZsk68tuDw",  # Dance Rising
+        "37i9dQZF1DX1T2fHl4Nxm8",  # Housewerk
+        "37i9dQZF1DXdLEN7aqioXM",  # RetroWave / Synthwave
+    ],
+    "hip-hop": [
+        "37i9dQZF1DX0XUsuxWHRQd",  # RapCaviar
+        "37i9dQZF1DX186v583rmzp",  # I Love My '90s Hip-Hop
+        "37i9dQZF1DWVA1Gq4XHa6U",  # Gold School
+        "37i9dQZF1DX2RxBh64g9LU",  # Hip-Hop Central
+    ],
+    "indie": [
+        "37i9dQZF1DX2Nc3B70tvx0",  # Indie's Top 50
+        "37i9dQZF1DXdbXrPNafg9d",  # All New Indie
+        "37i9dQZF1DX7gIoKmxkYYi",  # Indie Pop
+    ],
+    "jazz": [
+        "37i9dQZF1DXbITWG1ZJKYt",  # Jazz Classics
+        "37i9dQZF1DX4wta20PHgwo",  # Late Night Jazz
+    ],
+    "metal": [
+        "37i9dQZF1DX9qNs32fujYe",  # Heavy Metal
+        "37i9dQZF1DX5J7oVvC6y5y",  # Kickass Metal
+    ],
+    "r-n-b": [
+        "37i9dQZF1DX4Y4RhrZqHhr",  # R&B Classics
+        "37i9dQZF1DX4SBhb3fqAp5",  # Are & Be
+    ],
+    "classical": [
+        "37i9dQZF1DWWEJlAGA9gs0",  # Classical Essentials
+    ],
+    "synthwave": [
+        "37i9dQZF1DXdLEN7aqioXM",  # RetroWave / Outrun
+    ],
+    "blues": [
+        "37i9dQZF1DXd9rSDyQguIk",  # Blues Classics
+    ],
+    "country": [
+        "37i9dQZF1DX1lVhptIYRda",  # Hot Country
+    ],
+    "folk": [
+        "37i9dQZF1DXaUDcU6KDCj4",  # Folk & Acoustic
+    ],
+    "reggae": [
+        "37i9dQZF1DXbSbnqxMTGx9",  # Reggae Classics
+    ],
+    "disco": [
+        "37i9dQZF1DXaXB8fQg7xif",  # Disco Fever
+    ],
+    "ambient": [
+        "37i9dQZF1DX3Ogo9pFvBkY",  # Ambient Relaxation
+    ],
+    "lo-fi": [
+        "37i9dQZF1DX8Uebhn9wzrS",  # Chill Lofi Study Beats
+    ],
+    "k-pop": [
+        "37i9dQZF1DX9tPFwDMOaN1",  # K-Pop ON!
+    ],
 }
 
 SUPPORTED_GENRES = list(GENRE_PLAYLISTS.keys())
 
-# Built-in curated safety fallback tracks in case network is down
-FALLBACK_TRACKS: Dict[str, List[Dict[str, str]]] = {
-    "rock": [
-        {"title": "Bohemian Rhapsody", "artist": "Queen", "url": "https://open.spotify.com/track/7tFiyTwD0nx5a1eklYtX2J"},
-        {"title": "Sweet Child O' Mine", "artist": "Guns N' Roses", "url": "https://open.spotify.com/track/7o2CTH4ctstm8TNelqjb51"},
-        {"title": "Smells Like Teen Spirit", "artist": "Nirvana", "url": "https://open.spotify.com/track/5ghIJD29wCJuNy9NvcNUvN"},
-    ],
-    "pop": [
-        {"title": "Blinding Lights", "artist": "The Weeknd", "url": "https://open.spotify.com/track/0VjIjW4GlUZAMYd2vXMi3b"},
-        {"title": "As It Was", "artist": "Harry Styles", "url": "https://open.spotify.com/track/4LRPiXqCikLlN15c3yImP7"},
-        {"title": "Levitating", "artist": "Dua Lipa", "url": "https://open.spotify.com/track/463CkQjx2Zk1yXoBuierM9"},
-    ],
-    "electronic": [
-        {"title": "Get Lucky", "artist": "Daft Punk", "url": "https://open.spotify.com/track/2Foc5Q5nqNiosCNqttzHof"},
-        {"title": "Strobe", "artist": "deadmau5", "url": "https://open.spotify.com/track/4fukgq4n6Ff53u4Bf25iXn"},
-        {"title": "Midnight City", "artist": "M83", "url": "https://open.spotify.com/track/1eyzqe2QqGZUmfcPZtrIyt"},
-    ],
-    "hip-hop": [
-        {"title": "Lose Yourself", "artist": "Eminem", "url": "https://open.spotify.com/track/7w9BgsqALRI73T2d9gY05r"},
-        {"title": "HUMBLE.", "artist": "Kendrick Lamar", "url": "https://open.spotify.com/track/7KXjTSCq5nL1LoYtL7XAwS"},
-        {"title": "God's Plan", "artist": "Drake", "url": "https://open.spotify.com/track/6DCZcSspjsKoFjzjrWoCdn"},
-    ],
-    "synthwave": [
-        {"title": "Resonance", "artist": "HOME", "url": "https://open.spotify.com/track/1Tu2x9gM9y3o1q4QWvYp2k"},
-        {"title": "Tech Noir", "artist": "Gunship", "url": "https://open.spotify.com/track/5V44r4a1mGj4jD2y7E6R5f"},
-        {"title": "Sunset", "artist": "The Midnight", "url": "https://open.spotify.com/track/4N0WvdNDfl2zbLbsY7umNx"},
-    ],
-}
+# Syllable / character wildcards for randomized Spotify search queries
+SEARCH_WILDCARDS = [
+    "a", "e", "i", "o", "u", "th", "sh", "ch", "st", "re",
+    "li", "lo", "ma", "ra", "so", "da", "ne", "ve", "wa", "al"
+]
 
 
 class SpotifyService:
@@ -93,51 +125,100 @@ class SpotifyService:
             except Exception as e:
                 logger.warning("OpenSong: Failed to initialize official Spotipy client: %s", e)
 
-    async def get_random_song(self, allowed_genres: Optional[List[str]] = None) -> Optional[TrackInfo]:
+    async def get_random_song(
+        self,
+        allowed_genres: Optional[List[str]] = None,
+        exclude_titles: Optional[Set[str]] = None,
+    ) -> Optional[TrackInfo]:
         """
-        Gets a random song from Spotify based on the provided list of allowed genres.
-        Uses official Spotipy if configured, otherwise fetches from official Spotify embed playlists.
+        Gets a truly random song from Spotify based on the provided list of allowed genres.
+        Uses randomized wildcard queries, genre pools, and filters out recently sent tracks.
         """
         if not allowed_genres:
             allowed_genres = SUPPORTED_GENRES
 
-        # Filter valid genres
         valid_genres = [g for g in allowed_genres if g in SUPPORTED_GENRES]
         if not valid_genres:
             valid_genres = SUPPORTED_GENRES
 
         selected_genre = random.choice(valid_genres)
+        exclude_set = {t.lower().strip() for t in exclude_titles} if exclude_titles else set()
 
-        # 1. Try Spotipy official API if available
+        # 1. Official Spotipy API with deep randomized search
         if self._sp_client:
             try:
-                track = await asyncio.to_thread(self._fetch_via_spotipy, selected_genre)
+                track = await asyncio.to_thread(self._fetch_via_spotipy, selected_genre, exclude_set)
                 if track:
                     return track
             except Exception as e:
-                logger.warning("OpenSong: Spotipy search failed: %s. Falling back to embed.", e)
+                logger.warning("OpenSong: Spotipy search failed: %s. Falling back to playlist pool.", e)
 
-        # 2. Try fetching from public Spotify embed playlist
+        # 2. Public Spotify embed multi-playlist pool
         try:
-            track = await self._fetch_via_embed(selected_genre)
+            track = await self._fetch_via_embed(selected_genre, exclude_set)
             if track:
                 return track
         except Exception as e:
-            logger.warning("OpenSong: Spotify embed fetch failed for genre %s: %s", selected_genre, e)
+            logger.warning("OpenSong: Spotify playlist pool fetch failed for genre %s: %s", selected_genre, e)
 
-        # 3. Ultimate fallback: static curated catalog
-        return self._fetch_fallback(selected_genre)
+        # 3. Fallback from available pool ignoring exclude filter if pool exhausted
+        try:
+            track = await self._fetch_via_embed(selected_genre, set())
+            if track:
+                return track
+        except Exception:
+            pass
 
-    def _fetch_via_spotipy(self, genre: str) -> Optional[TrackInfo]:
-        import spotipy
-        offset = random.randint(0, 50)
-        query = f"genre:\"{genre}\""
-        results = self._sp_client.search(q=query, type="track", limit=20, offset=offset)
-        items = results.get("tracks", {}).get("items", [])
+        return None
+
+    def _fetch_via_spotipy(self, genre: str, exclude_titles: Set[str]) -> Optional[TrackInfo]:
+        """Performs deep randomized searches using random seeds, years, and offsets."""
+        random_seed = random.choice(SEARCH_WILDCARDS)
+        random_year = random.randint(1975, 2026)
+
+        query_strategies = [
+            f"{random_seed} genre:\"{genre}\" year:{random_year}",
+            f"{random_seed} genre:\"{genre}\"",
+            f"genre:\"{genre}\" year:{random_year}",
+            f"genre:\"{genre}\"",
+        ]
+
+        items = []
+        for query in query_strategies:
+            offset = random.randint(0, 150)
+            try:
+                results = self._sp_client.search(q=query, type="track", limit=50, offset=offset)
+                found = results.get("tracks", {}).get("items", [])
+                if found:
+                    items = found
+                    break
+            except Exception:
+                continue
+
+        # Filter out previously sent tracks
+        if items and exclude_titles:
+            filtered = [i for i in items if i.get("name", "").lower().strip() not in exclude_titles]
+            if filtered:
+                items = filtered
+
+        # If search didn't yield anything, try the Spotify recommendations engine
         if not items:
-            # Fallback search without quotes
-            results = self._sp_client.search(q=genre, type="track", limit=20, offset=offset)
-            items = results.get("tracks", {}).get("items", [])
+            try:
+                seed_genres = [genre]
+                rec_results = self._sp_client.recommendations(
+                    seed_genres=seed_genres,
+                    limit=30,
+                    target_energy=random.uniform(0.2, 0.95),
+                    target_valence=random.uniform(0.1, 0.95),
+                    target_danceability=random.uniform(0.2, 0.9)
+                )
+                items = rec_results.get("tracks", [])
+                if items and exclude_titles:
+                    filtered = [i for i in items if i.get("name", "").lower().strip() not in exclude_titles]
+                    if filtered:
+                        items = filtered
+            except Exception as e:
+                logger.debug("Spotify recommendations fallback error: %s", e)
 
         if not items:
             return None
@@ -159,72 +240,78 @@ class SpotifyService:
             genre=genre
         )
 
-    async def _fetch_via_embed(self, genre: str) -> Optional[TrackInfo]:
-        playlist_id = GENRE_PLAYLISTS.get(genre, GENRE_PLAYLISTS["pop"])
-        url = f"https://open.spotify.com/embed/playlist/{playlist_id}"
+    async def _fetch_via_embed(self, genre: str, exclude_titles: Set[str]) -> Optional[TrackInfo]:
+        """Randomly picks a playlist from the genre's multi-playlist pool and selects a track."""
+        playlist_pool = GENRE_PLAYLISTS.get(genre, GENRE_PLAYLISTS["pop"])
+        # Shuffle playlists to try
+        shuffled_pool = list(playlist_pool)
+        random.shuffle(shuffled_pool)
+
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
 
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                if resp.status != 200:
-                    return None
-                html = await resp.text()
-
-            match = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html)
-            if not match:
-                return None
-
-            data = json.loads(match.group(1))
-            props = data.get("props", {}).get("pageProps", {}).get("state", {}).get("data", {})
-            entity = props.get("entity", {})
-            tracks = entity.get("trackList", [])
-            if not tracks:
-                return None
-
-            chosen = random.choice(tracks)
-            title = chosen.get("title", "Unknown")
-            artist = chosen.get("subtitle", "Unknown")
-            duration_ms = chosen.get("duration", 180000)
-            duration = int(duration_ms // 1000)
-
-            uri = chosen.get("uri", "")
-            track_id = uri.split(":")[-1] if uri else ""
-            spotify_url = f"https://open.spotify.com/track/{track_id}" if track_id else ""
-
-            # Fetch cover image via Spotify oembed endpoint
-            cover_url = None
-            if spotify_url:
+            for playlist_id in shuffled_pool:
+                url = f"https://open.spotify.com/embed/playlist/{playlist_id}"
                 try:
-                    oembed_url = f"https://open.spotify.com/oembed?url={spotify_url}"
-                    async with session.get(oembed_url, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as om:
-                        if om.status == 200:
-                            om_data = await om.json(content_type=None)
-                            cover_url = om_data.get("thumbnail_url")
-                except Exception:
-                    pass
+                    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=12)) as resp:
+                        if resp.status != 200:
+                            continue
+                        html = await resp.text()
 
-            return TrackInfo(
-                title=title,
-                artist=artist,
-                duration=duration,
-                spotify_url=spotify_url,
-                cover_url=cover_url,
-                genre=genre
-            )
+                    match = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html)
+                    if not match:
+                        continue
 
-    def _fetch_fallback(self, genre: str) -> TrackInfo:
-        candidates = FALLBACK_TRACKS.get(genre, FALLBACK_TRACKS.get("pop", []))
-        if not candidates:
-            candidates = FALLBACK_TRACKS["pop"]
-        chosen = random.choice(candidates)
-        return TrackInfo(
-            title=chosen["title"],
-            artist=chosen["artist"],
-            duration=210,
-            spotify_url=chosen["url"],
-            cover_url=None,
-            genre=genre
-        )
+                    data = json.loads(match.group(1))
+                    props = data.get("props", {}).get("pageProps", {}).get("state", {}).get("data", {})
+                    entity = props.get("entity", {})
+                    tracks = entity.get("trackList", [])
+                    if not tracks:
+                        continue
 
+                    # Filter out excluded tracks
+                    if exclude_titles:
+                        candidate_tracks = [
+                            t for t in tracks if t.get("title", "").lower().strip() not in exclude_titles
+                        ]
+                        if candidate_tracks:
+                            tracks = candidate_tracks
+
+                    chosen = random.choice(tracks)
+                    title = chosen.get("title", "Unknown")
+                    artist = chosen.get("subtitle", "Unknown")
+                    duration_ms = chosen.get("duration", 180000)
+                    duration = int(duration_ms // 1000)
+
+                    uri = chosen.get("uri", "")
+                    track_id = uri.split(":")[-1] if uri else ""
+                    spotify_url = f"https://open.spotify.com/track/{track_id}" if track_id else ""
+
+                    # Fetch high resolution cover art via oEmbed
+                    cover_url = None
+                    if spotify_url:
+                        try:
+                            oembed_url = f"https://open.spotify.com/oembed?url={spotify_url}"
+                            async with session.get(oembed_url, headers=headers, timeout=aiohttp.ClientTimeout(total=6)) as om:
+                                if om.status == 200:
+                                    om_data = await om.json(content_type=None)
+                                    cover_url = om_data.get("thumbnail_url")
+                        except Exception:
+                            pass
+
+                    return TrackInfo(
+                        title=title,
+                        artist=artist,
+                        duration=duration,
+                        spotify_url=spotify_url,
+                        cover_url=cover_url,
+                        genre=genre
+                    )
+
+                except Exception as e:
+                    logger.debug("Error checking playlist %s: %s", playlist_id, e)
+                    continue
+
+        return None
