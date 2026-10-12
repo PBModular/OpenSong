@@ -5,6 +5,7 @@ help: |
   <b>Команды:</b>
   • <code>/opensong</code> — Меню настроек
   • <code>/opensong_send</code> — Отправить случайную песню сейчас
+  • <code>/opensong_top</code> — Топ залайканных треков чата
   • <code>/opensong_approver @username</code> — Изменить пользователя для подтверждения
 
 settings:
@@ -16,8 +17,10 @@ settings:
     <b>Интервал:</b> Каждые {interval} ч
     <b>Следующий трек:</b> {next_run}
     <b>Закрепление:</b> {pin_text}
+    <b>Откреплять старые:</b> {unpin_text}
     <b>Подтверждение в ЛС:</b> {approval_text}
     <b>Кто подтверждает:</b> @{approver}
+    <b>Лимит длительности:</b> {max_duration} мин
     <b>Жанры:</b> {genres_count}/{total_genres} выбрано
   enabled: Включено
   disabled: Выключено
@@ -38,11 +41,14 @@ settings:
     Если подтверждение включено, бот отправляет аудио в ЛС пользователю перед публикацией в чат.
     (Пользователь должен хотя бы раз запустить бота через /start)
   btn_interval: "Интервал: {interval} ч"
+  btn_duration: "Длительность: {duration} мин"
   btn_pin: "Закрепление: {status}"
+  btn_unpin_prev: "Откреплять старые: {status}"
   btn_approval: "Подтверждение: {status}"
   btn_status: "Авто-отправка: {status}"
   btn_genres: "Жанры ({count})"
   btn_approver: "Проверяет: @{user}"
+  btn_top: "Топ треков"
   btn_send_now: "Отправить сейчас"
   btn_refresh: "Обновить 🔄"
   btn_close: "Закрыть"
@@ -58,6 +64,13 @@ settings:
   no_permission: "Только администраторы чата могут менять настройки."
   min_genres_error: "Должен быть выбран хотя бы один жанр."
   closed: "Настройки закрыты."
+
+top:
+  header: "<b>Топ залайканных треков — {chat_title}</b>\n"
+  item: |
+    {rank}. <b>{title}</b> — {artist}
+       Рейтинг: {score} (👍 {likes} / 👎 {dislikes}) • <a href="{spotify_url}">Spotify</a>
+  empty: "В этом чате ещё нет треков с оценками для составления топа."
 
 song_message:
   caption: |

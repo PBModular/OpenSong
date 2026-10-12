@@ -13,7 +13,7 @@ from pyrogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
 )
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func, delete, case, text
 
 from base.module import BaseModule, command, callback_query, allowed_for
 from config import config
@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 GENRES_PER_PAGE = 6
 AVAILABLE_INTERVALS = [1, 3, 6, 12, 24, 48]
+AVAILABLE_DURATIONS = [300, 480, 600, 900, 1200]  # in seconds: 5m, 8m, 10m, 15m, 20m
 
 
 class OpenSongModule(BaseModule):
@@ -53,6 +54,30 @@ class OpenSongModule(BaseModule):
 
     async def on_db_ready(self):
         """Called when database is fully ready."""
+        # Ensure database schema is migrated for newly introduced columns
+        try:
+            async with self.db.engine.begin() as conn:
+                res = await conn.execute(text("PRAGMA table_info(opensong_chat_settings)"))
+                existing_cols = {row[1] for row in res.fetchall()}
+                if existing_cols:
+                    if "unpin_previous" not in existing_cols:
+                        await conn.execute(
+                            text("ALTER TABLE opensong_chat_settings ADD COLUMN unpin_previous BOOLEAN DEFAULT 1")
+                        )
+                        self.logger.info("Migrated opensong_chat_settings: added unpin_previous column.")
+                    if "last_pinned_message_id" not in existing_cols:
+                        await conn.execute(
+                            text("ALTER TABLE opensong_chat_settings ADD COLUMN last_pinned_message_id INTEGER")
+                        )
+                        self.logger.info("Migrated opensong_chat_settings: added last_pinned_message_id column.")
+                    if "max_duration_seconds" not in existing_cols:
+                        await conn.execute(
+                            text("ALTER TABLE opensong_chat_settings ADD COLUMN max_duration_seconds INTEGER DEFAULT 600")
+                        )
+                        self.logger.info("Migrated opensong_chat_settings: added max_duration_seconds column.")
+        except Exception as e:
+            self.logger.warning("Migration check error for opensong_chat_settings: %s", e)
+
         # Ensure default target chat from config if specified
         target_chat = self.module_config.get("target_chat_id")
         if target_chat:
@@ -103,6 +128,8 @@ class OpenSongModule(BaseModule):
                 approver = self.module_config.get("approver_username") or config.owner or "Ultra119"
                 interval = int(self.module_config.get("interval_hours", 24))
                 pin = bool(self.module_config.get("pin_song", True))
+                unpin = bool(self.module_config.get("unpin_previous", True))
+                max_dur = int(self.module_config.get("max_duration_seconds", 600))
                 approval = bool(self.module_config.get("require_approval", True))
 
                 settings = ChatSettings(
@@ -110,6 +137,9 @@ class OpenSongModule(BaseModule):
                     is_enabled=True,
                     interval_hours=interval,
                     pin_song=pin,
+                    unpin_previous=unpin,
+                    last_pinned_message_id=None,
+                    max_duration_seconds=max_dur,
                     require_approval=approval,
                     approver_username=str(approver).lstrip("@"),
                     included_genres=",".join(default_genres),
@@ -119,6 +149,17 @@ class OpenSongModule(BaseModule):
                 session.add(settings)
                 await session.commit()
                 await session.refresh(settings)
+            else:
+                updated = False
+                if getattr(settings, "unpin_previous", None) is None:
+                    settings.unpin_previous = bool(self.module_config.get("unpin_previous", True))
+                    updated = True
+                if getattr(settings, "max_duration_seconds", None) is None:
+                    settings.max_duration_seconds = int(self.module_config.get("max_duration_seconds", 600))
+                    updated = True
+                if updated:
+                    await session.commit()
+                    await session.refresh(settings)
             return settings
 
     # =========================================================================
@@ -137,10 +178,12 @@ class OpenSongModule(BaseModule):
         s = self.S["settings"]
         status_text = s["enabled"] if settings.is_enabled else s["disabled"]
         pin_text = s["enabled"] if settings.pin_song else s["disabled"]
+        unpin_text = s["enabled"] if getattr(settings, "unpin_previous", True) else s["disabled"]
         approval_text = s["enabled"] if settings.require_approval else s["disabled"]
         approver = settings.approver_username or "None"
         genres = settings.get_genres_list()
         next_run = self._format_time(settings.next_run_at)
+        max_duration_min = round((getattr(settings, "max_duration_seconds", 600) or 600) / 60)
 
         return s["info"].format(
             chat_title=chat_title,
@@ -148,8 +191,10 @@ class OpenSongModule(BaseModule):
             interval=settings.interval_hours,
             next_run=next_run,
             pin_text=pin_text,
+            unpin_text=unpin_text,
             approval_text=approval_text,
             approver=approver,
+            max_duration=max_duration_min,
             genres_count=len(genres),
             total_genres=len(SUPPORTED_GENRES),
         )
@@ -158,17 +203,23 @@ class OpenSongModule(BaseModule):
         s = self.S["settings"]
         chat_id = settings.chat_id
         pin_status = s["enabled_short"] if settings.pin_song else s["disabled_short"]
+        unpin_status = s["enabled_short"] if getattr(settings, "unpin_previous", True) else s["disabled_short"]
         auto_status = s["enabled_short"] if settings.is_enabled else s["disabled_short"]
         appr_status = s["enabled_short"] if settings.require_approval else s["disabled_short"]
         approver = settings.approver_username or "None"
         genres_count = len(settings.get_genres_list())
+        dur_min = round((getattr(settings, "max_duration_seconds", 600) or 600) / 60)
 
         buttons = [
             [
                 InlineKeyboardButton(
                     s["btn_interval"].format(interval=settings.interval_hours),
                     callback_data=f"os_menu:interval:{chat_id}",
-                )
+                ),
+                InlineKeyboardButton(
+                    s["btn_duration"].format(duration=dur_min),
+                    callback_data=f"os_toggle:duration:{chat_id}",
+                ),
             ],
             [
                 InlineKeyboardButton(
@@ -176,8 +227,8 @@ class OpenSongModule(BaseModule):
                     callback_data=f"os_toggle:pin:{chat_id}",
                 ),
                 InlineKeyboardButton(
-                    s["btn_status"].format(status=auto_status),
-                    callback_data=f"os_toggle:active:{chat_id}",
+                    s["btn_unpin_prev"].format(status=unpin_status),
+                    callback_data=f"os_toggle:unpin_prev:{chat_id}",
                 ),
             ],
             [
@@ -186,31 +237,39 @@ class OpenSongModule(BaseModule):
                     callback_data=f"os_toggle:approval:{chat_id}",
                 ),
                 InlineKeyboardButton(
-                    s["btn_approver"].format(user=approver),
-                    callback_data=f"os_menu:approver:{chat_id}",
+                    s["btn_status"].format(status=auto_status),
+                    callback_data=f"os_toggle:active:{chat_id}",
                 ),
             ],
             [
                 InlineKeyboardButton(
+                    s["btn_approver"].format(user=approver),
+                    callback_data=f"os_menu:approver:{chat_id}",
+                ),
+                InlineKeyboardButton(
                     s["btn_genres"].format(count=genres_count),
                     callback_data=f"os_menu:genres:{chat_id}:0",
-                )
+                ),
             ],
             [
+                InlineKeyboardButton(
+                    s["btn_top"],
+                    callback_data=f"os_action:top:{chat_id}",
+                ),
                 InlineKeyboardButton(
                     s["btn_send_now"],
                     callback_data=f"os_action:send_now:{chat_id}",
                 ),
+            ],
+            [
                 InlineKeyboardButton(
                     s["btn_refresh"],
                     callback_data=f"os_menu:refresh:{chat_id}",
                 ),
-            ],
-            [
                 InlineKeyboardButton(
                     s["btn_close"],
                     callback_data=f"os_action:close:{chat_id}",
-                )
+                ),
             ],
         ]
         return InlineKeyboardMarkup(buttons)
@@ -343,6 +402,57 @@ class OpenSongModule(BaseModule):
         status_msg = await message.reply(self.S["actions"]["searching"])
         asyncio.create_task(self._handle_manual_send(chat_id, status_msg, message.from_user.id))
 
+    async def _get_top_songs_text(self, chat_id: int, chat_title: str) -> str:
+        score_expr = func.coalesce(func.sum(case((SongVote.vote == "like", 1), else_=0)), 0) - func.coalesce(
+            func.sum(case((SongVote.vote == "dislike", 1), else_=0)), 0
+        )
+        async with self.db.session_maker() as session:
+            stmt = (
+                select(
+                    SongPost,
+                    func.coalesce(func.sum(case((SongVote.vote == "like", 1), else_=0)), 0).label("likes"),
+                    func.coalesce(func.sum(case((SongVote.vote == "dislike", 1), else_=0)), 0).label("dislikes"),
+                )
+                .join(SongVote, SongPost.id == SongVote.post_id)
+                .where(SongPost.chat_id == chat_id)
+                .group_by(SongPost.id)
+                .order_by(
+                    score_expr.desc(),
+                    func.coalesce(func.sum(case((SongVote.vote == "like", 1), else_=0)), 0).desc(),
+                )
+                .limit(10)
+            )
+            rows = (await session.execute(stmt)).all()
+
+        if not rows:
+            return self.S["top"]["empty"]
+
+        lines = [self.S["top"]["header"].format(chat_title=chat_title)]
+        for rank, (post, likes, dislikes) in enumerate(rows, start=1):
+            score = (likes or 0) - (dislikes or 0)
+            score_str = f"+{score}" if score > 0 else str(score)
+            sp_url = post.spotify_url or "https://open.spotify.com"
+            lines.append(
+                self.S["top"]["item"].format(
+                    rank=rank,
+                    title=post.title,
+                    artist=post.artist,
+                    score=score_str,
+                    likes=likes or 0,
+                    dislikes=dislikes or 0,
+                    spotify_url=sp_url,
+                ).rstrip()
+            )
+        return "\n".join(lines)
+
+    @command(["opensong_top", "song_top", "top_songs"])
+    async def top_songs_cmd(self, client: Client, message: Message):
+        """Displays top voted songs in current chat."""
+        chat_id = message.chat.id
+        chat_title = message.chat.title or message.chat.first_name or f"Chat {chat_id}"
+        text = await self._get_top_songs_text(chat_id, chat_title)
+        await message.reply(text, disable_web_page_preview=True)
+
     @allowed_for(["owner", "chat_admins"])
     @command("opensong_approver")
     async def set_approver_cmd(self, client: Client, message: Message):
@@ -444,7 +554,21 @@ class OpenSongModule(BaseModule):
             self.logger.error("Error in menu navigation: %s", e)
             await call.answer("Error updating menu")
 
-    @callback_query(filters.regex(r"^os_toggle:(pin|active|approval):(-?\d+)$"))
+    @callback_query(filters.regex(r"^os_action:top:(-?\d+)$"))
+    async def handle_top_action(self, client: Client, call: CallbackQuery):
+        chat_id = int(call.data.split(":")[2])
+        chat_title = call.message.chat.title or call.message.chat.first_name or f"Chat {chat_id}"
+        text = await self._get_top_songs_text(chat_id, chat_title)
+        markup = InlineKeyboardMarkup(
+            [[InlineKeyboardButton(self.S["settings"]["btn_back"], callback_data=f"os_menu:main:{chat_id}")]]
+        )
+        try:
+            await call.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+        except errors.MessageNotModified:
+            pass
+        await call.answer()
+
+    @callback_query(filters.regex(r"^os_toggle:(pin|unpin_prev|duration|active|approval):(-?\d+)$"))
     async def handle_toggle(self, client: Client, call: CallbackQuery):
         if not await self._is_admin(call):
             await call.answer(self.S["settings"]["no_permission"], show_alert=True)
@@ -461,6 +585,16 @@ class OpenSongModule(BaseModule):
 
             if target == "pin":
                 settings.pin_song = not settings.pin_song
+            elif target == "unpin_prev":
+                settings.unpin_previous = not getattr(settings, "unpin_previous", True)
+            elif target == "duration":
+                cur_dur = getattr(settings, "max_duration_seconds", 600) or 600
+                if cur_dur in AVAILABLE_DURATIONS:
+                    idx = AVAILABLE_DURATIONS.index(cur_dur)
+                    next_dur = AVAILABLE_DURATIONS[(idx + 1) % len(AVAILABLE_DURATIONS)]
+                else:
+                    next_dur = AVAILABLE_DURATIONS[0]
+                settings.max_duration_seconds = next_dur
             elif target == "active":
                 settings.is_enabled = not settings.is_enabled
                 if settings.is_enabled and (not settings.next_run_at or settings.next_run_at < time.time()):
@@ -878,13 +1012,25 @@ class OpenSongModule(BaseModule):
             except Exception as e:
                 self.logger.warning("Failed to update post reply markup: %s", e)
 
-        # Pin message if enabled
+        # Pin message if enabled and unpin previous
         async with self.db.session_maker() as session:
             settings = await session.scalar(select(ChatSettings).where(ChatSettings.chat_id == chat_id))
             if settings:
                 if settings.pin_song:
+                    if getattr(settings, "unpin_previous", True) and settings.last_pinned_message_id:
+                        try:
+                            await self.bot.unpin_chat_message(chat_id, settings.last_pinned_message_id)
+                            self.logger.info(
+                                "Unpinned previous song message %s in chat %s",
+                                settings.last_pinned_message_id,
+                                chat_id,
+                            )
+                        except Exception as unpin_err:
+                            self.logger.warning("Could not unpin previous song message in %s: %s", chat_id, unpin_err)
+
                     try:
                         await self.bot.pin_chat_message(chat_id, sent_msg.id, disable_notification=True)
+                        settings.last_pinned_message_id = sent_msg.id
                         self.logger.info("Pinned song message %s in chat %s", sent_msg.id, chat_id)
                     except Exception as pin_err:
                         self.logger.warning("Could not pin song message in %s: %s", chat_id, pin_err)
@@ -912,6 +1058,7 @@ class OpenSongModule(BaseModule):
         async with lock:
             settings = await self._get_or_create_settings(chat_id)
             genres = settings.get_genres_list()
+            max_duration = getattr(settings, "max_duration_seconds", 600) or 600
 
             # Query recently posted songs in this chat (last 60 days) to avoid repeats
             exclude_titles = set()
@@ -927,9 +1074,9 @@ class OpenSongModule(BaseModule):
             except Exception as e:
                 self.logger.warning("Could not fetch recent post history for duplicate filtering: %s", e)
 
-            # 1. Search in Spotify with history exclusion
+            # 1. Search in Spotify with history exclusion and max_duration limit
             track_info: Optional[TrackInfo] = await self.spotify.get_random_song(
-                genres, exclude_titles=exclude_titles
+                genres, exclude_titles=exclude_titles, max_duration=max_duration
             )
             if not track_info:
                 self.logger.error("Could not obtain any song for genres: %s", genres)
@@ -943,11 +1090,12 @@ class OpenSongModule(BaseModule):
                 track_info.genre,
             )
 
-            # 2. Download from YouTube
+            # 2. Download from YouTube with max_duration limit
             downloaded: Optional[DownloadedTrack] = await self.downloader.download_track(
                 title=track_info.title,
                 artist=track_info.artist,
                 cover_url=track_info.cover_url,
+                max_duration=max_duration,
             )
             if not downloaded or not os.path.exists(downloaded.audio_path):
                 self.logger.error("Failed to download YouTube audio for %s - %s", track_info.artist, track_info.title)

@@ -129,10 +129,12 @@ class SpotifyService:
         self,
         allowed_genres: Optional[List[str]] = None,
         exclude_titles: Optional[Set[str]] = None,
+        max_duration: int = 600,
     ) -> Optional[TrackInfo]:
         """
         Gets a truly random song from Spotify based on the provided list of allowed genres.
-        Uses randomized wildcard queries, genre pools, and filters out recently sent tracks.
+        Uses randomized wildcard queries, genre pools, filters out recently sent tracks,
+        and enforces max_duration.
         """
         if not allowed_genres:
             allowed_genres = SUPPORTED_GENRES
@@ -147,7 +149,7 @@ class SpotifyService:
         # 1. Official Spotipy API with deep randomized search
         if self._sp_client:
             try:
-                track = await asyncio.to_thread(self._fetch_via_spotipy, selected_genre, exclude_set)
+                track = await asyncio.to_thread(self._fetch_via_spotipy, selected_genre, exclude_set, max_duration)
                 if track:
                     return track
             except Exception as e:
@@ -155,7 +157,7 @@ class SpotifyService:
 
         # 2. Public Spotify embed multi-playlist pool
         try:
-            track = await self._fetch_via_embed(selected_genre, exclude_set)
+            track = await self._fetch_via_embed(selected_genre, exclude_set, max_duration)
             if track:
                 return track
         except Exception as e:
@@ -163,7 +165,7 @@ class SpotifyService:
 
         # 3. Fallback from available pool ignoring exclude filter if pool exhausted
         try:
-            track = await self._fetch_via_embed(selected_genre, set())
+            track = await self._fetch_via_embed(selected_genre, set(), max_duration)
             if track:
                 return track
         except Exception:
@@ -171,10 +173,10 @@ class SpotifyService:
 
         return None
 
-    def _fetch_via_spotipy(self, genre: str, exclude_titles: Set[str]) -> Optional[TrackInfo]:
+    def _fetch_via_spotipy(self, genre: str, exclude_titles: Set[str], max_duration: int = 600) -> Optional[TrackInfo]:
         """Performs deep randomized searches using random seeds, years, and offsets."""
         random_seed = random.choice(SEARCH_WILDCARDS)
-        random_year = random.randint(1975, 2026)
+        random_year = random.randint(1975, 2024)
 
         query_strategies = [
             f"{random_seed} genre:\"{genre}\" year:{random_year}",
@@ -195,11 +197,16 @@ class SpotifyService:
             except Exception:
                 continue
 
-        # Filter out previously sent tracks
+        # Filter out previously sent tracks and tracks exceeding duration limit
         if items and exclude_titles:
             filtered = [i for i in items if i.get("name", "").lower().strip() not in exclude_titles]
             if filtered:
                 items = filtered
+
+        if items and max_duration > 0:
+            dur_filtered = [i for i in items if (i.get("duration_ms", 0) // 1000) <= max_duration]
+            if dur_filtered:
+                items = dur_filtered
 
         # If search didn't yield anything, try the Spotify recommendations engine
         if not items:
@@ -217,6 +224,10 @@ class SpotifyService:
                     filtered = [i for i in items if i.get("name", "").lower().strip() not in exclude_titles]
                     if filtered:
                         items = filtered
+                if items and max_duration > 0:
+                    dur_filtered = [i for i in items if (i.get("duration_ms", 0) // 1000) <= max_duration]
+                    if dur_filtered:
+                        items = dur_filtered
             except Exception as e:
                 logger.debug("Spotify recommendations fallback error: %s", e)
 
@@ -240,7 +251,7 @@ class SpotifyService:
             genre=genre
         )
 
-    async def _fetch_via_embed(self, genre: str, exclude_titles: Set[str]) -> Optional[TrackInfo]:
+    async def _fetch_via_embed(self, genre: str, exclude_titles: Set[str], max_duration: int = 600) -> Optional[TrackInfo]:
         """Randomly picks a playlist from the genre's multi-playlist pool and selects a track."""
         playlist_pool = GENRE_PLAYLISTS.get(genre, GENRE_PLAYLISTS["pop"])
         # Shuffle playlists to try
@@ -275,6 +286,14 @@ class SpotifyService:
                     if exclude_titles:
                         candidate_tracks = [
                             t for t in tracks if t.get("title", "").lower().strip() not in exclude_titles
+                        ]
+                        if candidate_tracks:
+                            tracks = candidate_tracks
+
+                    # Filter out tracks exceeding max_duration
+                    if max_duration > 0:
+                        candidate_tracks = [
+                            t for t in tracks if (t.get("duration", 0) // 1000) <= max_duration
                         ]
                         if candidate_tracks:
                             tracks = candidate_tracks

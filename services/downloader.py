@@ -25,17 +25,17 @@ class YouTubeDownloader:
         os.makedirs(self.temp_dir, exist_ok=True)
 
     async def download_track(
-        self, title: str, artist: str, cover_url: Optional[str] = None
+        self, title: str, artist: str, cover_url: Optional[str] = None, max_duration: int = 600
     ) -> Optional[DownloadedTrack]:
         """
         Searches and downloads the audio track from YouTube using yt-dlp.
-        Runs asynchronously in a thread worker.
+        Runs asynchronously in a thread worker. Enforces max_duration limit.
         """
         query = f"ytsearch1:{artist} - {title} audio"
         logger.info("OpenSong: Searching and downloading track via YouTube: %s", query)
 
         try:
-            download_result = await asyncio.to_thread(self._run_ytdlp, query)
+            download_result = await asyncio.to_thread(self._run_ytdlp, query, max_duration)
             if not download_result:
                 return None
 
@@ -57,8 +57,15 @@ class YouTubeDownloader:
             logger.error("OpenSong: Error downloading audio for %s - %s: %s", artist, title, e, exc_info=True)
             return None
 
-    def _run_ytdlp(self, query: str):
+    def _run_ytdlp(self, query: str, max_duration: int = 600):
         outtmpl = os.path.join(self.temp_dir, "%(id)s.%(ext)s")
+
+        def duration_filter(info_dict, *, incomplete):
+            dur = info_dict.get("duration")
+            if dur and max_duration > 0 and dur > max_duration:
+                return f"Duration {dur}s exceeds maximum limit of {max_duration}s"
+            return None
+
         ydl_opts = {
             "format": "bestaudio/best",
             "postprocessors": [{
@@ -72,6 +79,7 @@ class YouTubeDownloader:
             "no_warnings": True,
             "default_search": "ytsearch1",
             "socket_timeout": 30,
+            "match_filter": duration_filter,
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:

@@ -19,6 +19,9 @@ class ChatSettings(Base):
     included_genres: Mapped[str] = mapped_column(
         Text, default="pop,rock,electronic,hip-hop,indie,jazz,metal,r-n-b,classical,synthwave"
     )
+    unpin_previous: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_pinned_message_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    max_duration_seconds: Mapped[int] = mapped_column(Integer, default=600)
     last_sent_at: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     next_run_at: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 

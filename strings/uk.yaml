@@ -5,6 +5,7 @@ help: |
   <b>Команди:</b>
   • <code>/opensong</code> — Меню налаштувань
   • <code>/opensong_send</code> — Надіслати випадкову пісню зараз
+  • <code>/opensong_top</code> — Топ найбільш залайканих пісень чату
   • <code>/opensong_approver @username</code> — Змінити користувача для схвалення
 
 settings:
@@ -16,8 +17,10 @@ settings:
     <b>Інтервал:</b> Кожні {interval} год
     <b>Наступна пісня:</b> {next_run}
     <b>Закріплення:</b> {pin_text}
+    <b>Відкріплювати старі:</b> {unpin_text}
     <b>Схвалення в ПП:</b> {approval_text}
     <b>Хто схвалює:</b> @{approver}
+    <b>Ліміт тривалості:</b> {max_duration} хв
     <b>Жанри:</b> {genres_count}/{total_genres} обрано
   enabled: Увімкнено
   disabled: Вимкнено
@@ -38,11 +41,14 @@ settings:
     Якщо схвалення увімкнено, бот надсилає аудіо в ПП користувачу перед публікацією в чат.
     (Користувач має хоча б раз запустити бота через /start)
   btn_interval: "Інтервал: {interval} год"
+  btn_duration: "Тривалість: {duration} хв"
   btn_pin: "Закріплення: {status}"
+  btn_unpin_prev: "Відкріплювати старі: {status}"
   btn_approval: "Схвалення: {status}"
   btn_status: "Авто-надсилання: {status}"
   btn_genres: "Жанри ({count})"
   btn_approver: "Схвалює: @{user}"
+  btn_top: "Топ пісень"
   btn_send_now: "Надіслати зараз"
   btn_refresh: "Оновити 🔄"
   btn_close: "Закрити"
@@ -58,6 +64,13 @@ settings:
   no_permission: "Тільки адміністратори чату можуть змінювати налаштування."
   min_genres_error: "Має бути обрано хоча б один жанр."
   closed: "Налаштування закрито."
+
+top:
+  header: "<b>Топ найбільш залайканих пісень — {chat_title}</b>\n"
+  item: |
+    {rank}. <b>{title}</b> — {artist}
+       Рейтинг: {score} (👍 {likes} / 👎 {dislikes}) • <a href="{spotify_url}">Spotify</a>
+  empty: "У цьому чаті ще немає пісень із голосами для формування топу."
 
 song_message:
   caption: |

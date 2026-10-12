@@ -5,6 +5,7 @@ help: |
   <b>Commands:</b>
   • <code>/opensong</code> — Settings menu
   • <code>/opensong_send</code> — Send a random song now
+  • <code>/opensong_top</code> — Top liked songs in chat
   • <code>/opensong_approver @username</code> — Change approver username
 
 settings:
@@ -16,8 +17,10 @@ settings:
     <b>Interval:</b> Every {interval}h
     <b>Next song:</b> {next_run}
     <b>Pin message:</b> {pin_text}
+    <b>Unpin previous:</b> {unpin_text}
     <b>DM approval:</b> {approval_text}
     <b>Approver:</b> @{approver}
+    <b>Duration limit:</b> {max_duration} min
     <b>Genres:</b> {genres_count}/{total_genres} selected
   enabled: Enabled
   disabled: Disabled
@@ -38,11 +41,14 @@ settings:
     When approval is enabled, the bot sends preview audio to the approver's DM before publishing to the chat.
     (The approver must have started the bot via /start)
   btn_interval: "Interval: {interval}h"
+  btn_duration: "Duration: {duration}m"
   btn_pin: "Pin: {status}"
+  btn_unpin_prev: "Unpin previous: {status}"
   btn_approval: "Approval: {status}"
   btn_status: "Auto-Send: {status}"
   btn_genres: "Genres ({count})"
   btn_approver: "Approver: @{user}"
+  btn_top: "Top songs"
   btn_send_now: "Send now"
   btn_refresh: "Refresh 🔄"
   btn_close: "Close"
@@ -58,6 +64,13 @@ settings:
   no_permission: "Only chat administrators can modify OpenSong settings."
   min_genres_error: "At least one genre must remain selected."
   closed: "Settings closed."
+
+top:
+  header: "<b>Top Liked Songs — {chat_title}</b>\n"
+  item: |
+    {rank}. <b>{title}</b> — {artist}
+       Rating: {score} (👍 {likes} / 👎 {dislikes}) • <a href="{spotify_url}">Spotify</a>
+  empty: "No voted songs found in this chat yet."
 
 song_message:
   caption: |

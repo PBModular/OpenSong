@@ -1,7 +1,7 @@
 info:
   name: OpenSong
   author: Ultra119
-  version: "1.0.0"
+  version: "1.1.0"
   description: "Sends daily random songs from Spotify downloaded via YouTube with community voting, approval flow, and customizable settings"
   auto_load: true
 
@@ -13,6 +13,8 @@ config:
   target_chat_id: null
   interval_hours: 24
   pin_song: true
+  unpin_previous: true
+  max_duration_seconds: 600
   require_approval: true
   genres:
     - pop
