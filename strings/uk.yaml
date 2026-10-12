@@ -4,6 +4,7 @@ help: |
 
   <b>Команди:</b>
   • <code>/opensong</code> — Меню налаштувань
+  • <code>/player</code> — Музичний плеєр (Попередня/Наступна/Зберегти)
   • <code>/opensong_send</code> — Надіслати випадкову пісню зараз
   • <code>/opensong_top</code> — Топ найбільш залайканих пісень чату
   • <code>/opensong_approver @username</code> — Змінити користувача для схвалення
@@ -112,3 +113,31 @@ actions:
   approver_dm_error: "Не вдалося написати в ПП @{approver} (користувач не запустив бота). Пісню надіслано напряму в чат."
   approver_updated: "Користувача для схвалення змінено на @{user}."
   approver_invalid: "Вкажіть юзернейм, наприклад: /opensong_approver @username"
+
+player:
+  caption: |
+    <b>Плеєр OpenSong</b> [{current}/{total}]
+
+    <b>Назва:</b> {title}
+    <b>Виконавець:</b> {artist}
+    <b>Жанр:</b> #{genre}
+
+    <a href="{spotify_url}">Слухати в Spotify</a>
+  saved_caption: |
+    <b>Збережений трек</b>
+
+    <b>Назва:</b> {title}
+    <b>Виконавець:</b> {artist}
+    <b>Жанр:</b> #{genre}
+
+    <a href="{spotify_url}">Слухати в Spotify</a>
+  btn_prev: "◀ Попередня"
+  btn_save: "💾 Зберегти"
+  btn_next: "Наступна ▶"
+  btn_close: "Закрити"
+  searching: "Запуск плеєра та завантаження першого треку..."
+  loading: "Завантажуємо трек..."
+  cooldown: "Зачекайте кілька секунд перед перемиканням."
+  at_first_track: "Ви на першому треку."
+  saved_toast: "Трек збережено окремим повідомленням у чаті!"
+  error: "Не вдалося завантажити трек. Спробуйте пізніше."

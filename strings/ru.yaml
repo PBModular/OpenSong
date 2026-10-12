@@ -4,6 +4,7 @@ help: |
 
   <b>Команды:</b>
   • <code>/opensong</code> — Меню настроек
+  • <code>/player</code> — Музыкальный плеер (Предыдущая/Следующая/Сохранить)
   • <code>/opensong_send</code> — Отправить случайную песню сейчас
   • <code>/opensong_top</code> — Топ залайканных треков чата
   • <code>/opensong_approver @username</code> — Изменить пользователя для подтверждения
@@ -112,3 +113,31 @@ actions:
   approver_dm_error: "Не удалось написать в ЛС @{approver} (пользователь не запустил бота). Трек отправлен напрямую в чат."
   approver_updated: "Ответственный за подтверждение изменен на @{user}."
   approver_invalid: "Укажите юзернейм, например: /opensong_approver @username"
+
+player:
+  caption: |
+    <b>Плеер OpenSong</b> [{current}/{total}]
+
+    <b>Название:</b> {title}
+    <b>Исполнитель:</b> {artist}
+    <b>Жанр:</b> #{genre}
+
+    <a href="{spotify_url}">Слушать в Spotify</a>
+  saved_caption: |
+    <b>Сохраненный трек</b>
+
+    <b>Название:</b> {title}
+    <b>Исполнитель:</b> {artist}
+    <b>Жанр:</b> #{genre}
+
+    <a href="{spotify_url}">Слушать в Spotify</a>
+  btn_prev: "◀ Предыдущая"
+  btn_save: "💾 Сохранить"
+  btn_next: "Следующая ▶"
+  btn_close: "Закрыть"
+  searching: "Запуск плеера и скачивание первого трека..."
+  loading: "Загружаем трек..."
+  cooldown: "Подождите несколько секунд перед переключением."
+  at_first_track: "Вы на первом треке."
+  saved_toast: "Трек сохранен отдельным сообщением в чате!"
+  error: "Не удалось скачать трек. Попробуйте позже."

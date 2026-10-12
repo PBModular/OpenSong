@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import dataclass
 import datetime
 import logging
 import math
@@ -28,6 +29,26 @@ AVAILABLE_INTERVALS = [1, 3, 6, 12, 24, 48]
 AVAILABLE_DURATIONS = [300, 480, 600, 900, 1200]  # in seconds: 5m, 8m, 10m, 15m, 20m
 
 
+@dataclass
+class PlayerTrack:
+    title: str
+    artist: str
+    genre: str
+    duration: int
+    spotify_url: str
+    file_id: Optional[str] = None
+
+
+class PlayerSession:
+    def __init__(self, chat_id: int):
+        self.chat_id: int = chat_id
+        self.message_id: Optional[int] = None
+        self.history: List[PlayerTrack] = []
+        self.current_index: int = -1
+        self.lock: asyncio.Lock = asyncio.Lock()
+        self.last_action_time: float = 0.0
+
+
 class OpenSongModule(BaseModule):
     @property
     def help_page(self):
@@ -41,6 +62,7 @@ class OpenSongModule(BaseModule):
         self._is_stopping = False
         self._scheduler_task: Optional[asyncio.Task] = None
         self._chat_locks: Dict[int, asyncio.Lock] = {}
+        self._player_sessions: Dict[int, PlayerSession] = {}
 
         # Initialize Spotify service
         sp_id = self.module_config.get("spotify_client_id", "")
@@ -95,6 +117,7 @@ class OpenSongModule(BaseModule):
         self._is_stopping = True
         if self._scheduler_task and not self._scheduler_task.done():
             self._scheduler_task.cancel()
+        self._player_sessions.clear()
         self.downloader.cleanup_temp_dir()
 
     def _get_chat_lock(self, chat_id: int) -> asyncio.Lock:
@@ -379,9 +402,42 @@ class OpenSongModule(BaseModule):
         ]
         return InlineKeyboardMarkup(buttons)
 
+    def _build_player_markup(self, chat_id: int) -> InlineKeyboardMarkup:
+        s = self.S["player"]
+        return InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(s["btn_prev"], callback_data=f"os_pl:prev:{chat_id}"),
+                    InlineKeyboardButton(s["btn_save"], callback_data=f"os_pl:save:{chat_id}"),
+                    InlineKeyboardButton(s["btn_next"], callback_data=f"os_pl:next:{chat_id}"),
+                ],
+                [
+                    InlineKeyboardButton(s["btn_close"], callback_data=f"os_pl:close:{chat_id}"),
+                ],
+            ]
+        )
+
+    def _build_player_caption(self, track: PlayerTrack, index: int, total: int) -> str:
+        s = self.S["player"]
+        return s["caption"].format(
+            current=index + 1,
+            total=total,
+            title=track.title,
+            artist=track.artist,
+            genre=track.genre,
+            spotify_url=track.spotify_url or "https://open.spotify.com",
+        )
+
     # =========================================================================
     # Commands
     # =========================================================================
+
+    @command(["player", "song_player", "opensong_player"])
+    async def player_cmd(self, client: Client, message: Message):
+        """Starts an interactive music player with Prev/Save/Next controls."""
+        chat_id = message.chat.id
+        status_msg = await message.reply(self.S["player"]["searching"])
+        asyncio.create_task(self._start_player_session(chat_id, status_msg))
 
     @allowed_for(["owner", "chat_admins"])
     @command(["opensong", "opensong_settings", "song_settings"])
@@ -756,6 +812,322 @@ class OpenSongModule(BaseModule):
                 await status_msg.edit_text(self.S["actions"]["sent_success"])
         else:
             await status_msg.edit_text(self.S["actions"]["send_error"])
+
+    # =========================================================================
+    # Interactive Music Player (Prev / Save / Next)
+    # =========================================================================
+
+    async def _start_player_session(self, chat_id: int, status_msg: Message):
+        session = self._player_sessions.get(chat_id)
+        if not session:
+            session = PlayerSession(chat_id)
+            self._player_sessions[chat_id] = session
+
+        async with session.lock:
+            # If session already has an active track in history, replay it
+            if session.history and 0 <= session.current_index < len(session.history):
+                track = session.history[session.current_index]
+                if track.file_id:
+                    markup = self._build_player_markup(chat_id)
+                    caption = self._build_player_caption(track, session.current_index, len(session.history))
+                    try:
+                        sent_msg = await self.bot.send_audio(
+                            chat_id=chat_id,
+                            audio=track.file_id,
+                            caption=caption,
+                            duration=track.duration,
+                            performer=track.artist,
+                            title=track.title,
+                            reply_markup=markup,
+                        )
+                        old_msg_id = session.message_id
+                        session.message_id = sent_msg.id
+                        if old_msg_id and old_msg_id != sent_msg.id:
+                            try:
+                                await self.bot.delete_messages(chat_id, old_msg_id)
+                            except Exception:
+                                pass
+                        try:
+                            await status_msg.delete()
+                        except Exception:
+                            pass
+                        return
+                    except Exception as e:
+                        self.logger.warning("Could not re-send cached player audio: %s", e)
+
+            # Otherwise, discover and download first track
+            settings = await self._get_or_create_settings(chat_id)
+            genres = settings.get_genres_list()
+            max_duration = getattr(settings, "max_duration_seconds", 600) or 600
+
+            track_info = await self.spotify.get_random_song(genres, max_duration=max_duration)
+            if not track_info:
+                try:
+                    await status_msg.edit_text(self.S["player"]["error"])
+                except Exception:
+                    pass
+                return
+
+            downloaded = await self.downloader.download_track(
+                title=track_info.title,
+                artist=track_info.artist,
+                cover_url=track_info.cover_url,
+                max_duration=max_duration,
+            )
+            if not downloaded or not os.path.exists(downloaded.audio_path):
+                try:
+                    await status_msg.edit_text(self.S["player"]["error"])
+                except Exception:
+                    pass
+                return
+
+            track = PlayerTrack(
+                title=track_info.title,
+                artist=track_info.artist,
+                genre=track_info.genre,
+                duration=downloaded.duration or track_info.duration,
+                spotify_url=track_info.spotify_url,
+            )
+            session.history.append(track)
+            session.current_index = len(session.history) - 1
+
+            markup = self._build_player_markup(chat_id)
+            caption = self._build_player_caption(track, session.current_index, len(session.history))
+
+            try:
+                sent_msg = await self.bot.send_audio(
+                    chat_id=chat_id,
+                    audio=downloaded.audio_path,
+                    caption=caption,
+                    duration=track.duration,
+                    performer=track.artist,
+                    title=track.title,
+                    thumb=downloaded.cover_path if downloaded.cover_path and os.path.exists(downloaded.cover_path) else None,
+                    reply_markup=markup,
+                )
+                if sent_msg.audio:
+                    track.file_id = sent_msg.audio.file_id
+                old_msg_id = session.message_id
+                session.message_id = sent_msg.id
+                session.last_action_time = time.time()
+                if old_msg_id and old_msg_id != sent_msg.id:
+                    try:
+                        await self.bot.delete_messages(chat_id, old_msg_id)
+                    except Exception:
+                        pass
+            except Exception as e:
+                self.logger.error("Failed to send initial player audio: %s", e)
+                try:
+                    await status_msg.edit_text(self.S["player"]["error"])
+                except Exception:
+                    pass
+                return
+            finally:
+                self.downloader.cleanup_files(downloaded.audio_path, downloaded.cover_path)
+
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
+
+    @callback_query(filters.regex(r"^os_pl:(prev|next|save|close):(-?\d+)$"))
+    async def handle_player_callback(self, client: Client, call: CallbackQuery):
+        parts = call.data.split(":")
+        action = parts[1]
+        chat_id = int(parts[2])
+
+        session = self._player_sessions.get(chat_id)
+        if not session or not session.history:
+            if action == "close":
+                try:
+                    await call.message.delete()
+                except Exception:
+                    pass
+                await call.answer()
+                return
+            await call.answer("Session expired. Send /player to start.", show_alert=True)
+            return
+
+        now = time.time()
+        # Cooldown to avoid rapid double-tapping
+        if action in ("prev", "next") and (now - session.last_action_time < 2.5):
+            await call.answer(self.S["player"]["cooldown"], show_alert=False)
+            return
+
+        if action == "close":
+            self._player_sessions.pop(chat_id, None)
+            try:
+                await call.message.delete()
+            except Exception:
+                pass
+            await call.answer()
+            return
+
+        if action == "save":
+            if session.current_index < 0 or session.current_index >= len(session.history):
+                await call.answer()
+                return
+            track = session.history[session.current_index]
+            if not track.file_id:
+                await call.answer("Audio not available to save.", show_alert=True)
+                return
+
+            saved_caption = self.S["player"]["saved_caption"].format(
+                title=track.title,
+                artist=track.artist,
+                genre=track.genre,
+                spotify_url=track.spotify_url or "https://open.spotify.com",
+            )
+            try:
+                await self.bot.send_audio(
+                    chat_id=chat_id,
+                    audio=track.file_id,
+                    caption=saved_caption,
+                    duration=track.duration,
+                    performer=track.artist,
+                    title=track.title,
+                )
+                await call.answer(self.S["player"]["saved_toast"])
+            except Exception as e:
+                self.logger.warning("Failed to save audio in separate message: %s", e)
+                await call.answer("Error saving track to chat.", show_alert=True)
+            return
+
+        if action == "prev":
+            if session.current_index <= 0:
+                await call.answer(self.S["player"]["at_first_track"], show_alert=False)
+                return
+
+            if session.lock.locked():
+                await call.answer(self.S["player"]["loading"], show_alert=False)
+                return
+
+            session.last_action_time = now
+            async with session.lock:
+                session.current_index -= 1
+                track = session.history[session.current_index]
+                markup = self._build_player_markup(chat_id)
+                caption = self._build_player_caption(track, session.current_index, len(session.history))
+
+                old_msg_id = session.message_id or call.message.id
+                try:
+                    sent_msg = await self.bot.send_audio(
+                        chat_id=chat_id,
+                        audio=track.file_id,
+                        caption=caption,
+                        duration=track.duration,
+                        performer=track.artist,
+                        title=track.title,
+                        reply_markup=markup,
+                    )
+                    session.message_id = sent_msg.id
+                    try:
+                        await self.bot.delete_messages(chat_id, old_msg_id)
+                    except Exception:
+                        pass
+                except Exception as e:
+                    self.logger.error("Failed to navigate back in player: %s", e)
+                await call.answer()
+            return
+
+        if action == "next":
+            if session.lock.locked():
+                await call.answer(self.S["player"]["loading"], show_alert=False)
+                return
+
+            session.last_action_time = now
+
+            # If next track is already cached in history, deliver immediately using Telegram file_id (0 YT downloads)
+            if session.current_index < len(session.history) - 1:
+                async with session.lock:
+                    session.current_index += 1
+                    track = session.history[session.current_index]
+                    markup = self._build_player_markup(chat_id)
+                    caption = self._build_player_caption(track, session.current_index, len(session.history))
+
+                    old_msg_id = session.message_id or call.message.id
+                    try:
+                        sent_msg = await self.bot.send_audio(
+                            chat_id=chat_id,
+                            audio=track.file_id,
+                            caption=caption,
+                            duration=track.duration,
+                            performer=track.artist,
+                            title=track.title,
+                            reply_markup=markup,
+                        )
+                        session.message_id = sent_msg.id
+                        try:
+                            await self.bot.delete_messages(chat_id, old_msg_id)
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        self.logger.error("Failed to navigate forward in player history: %s", e)
+                    await call.answer()
+                return
+
+            # Otherwise, fetch a new track from Spotify and YouTube
+            await call.answer(self.S["player"]["loading"], show_alert=False)
+
+            async with session.lock:
+                settings = await self._get_or_create_settings(chat_id)
+                genres = settings.get_genres_list()
+                max_duration = getattr(settings, "max_duration_seconds", 600) or 600
+
+                exclude_titles = {t.title.lower().strip() for t in session.history}
+                track_info = await self.spotify.get_random_song(
+                    genres, exclude_titles=exclude_titles, max_duration=max_duration
+                )
+                if not track_info:
+                    await call.answer(self.S["player"]["error"], show_alert=True)
+                    return
+
+                downloaded = await self.downloader.download_track(
+                    title=track_info.title,
+                    artist=track_info.artist,
+                    cover_url=track_info.cover_url,
+                    max_duration=max_duration,
+                )
+                if not downloaded or not os.path.exists(downloaded.audio_path):
+                    await call.answer(self.S["player"]["error"], show_alert=True)
+                    return
+
+                new_track = PlayerTrack(
+                    title=track_info.title,
+                    artist=track_info.artist,
+                    genre=track_info.genre,
+                    duration=downloaded.duration or track_info.duration,
+                    spotify_url=track_info.spotify_url,
+                )
+                session.history.append(new_track)
+                session.current_index = len(session.history) - 1
+
+                markup = self._build_player_markup(chat_id)
+                caption = self._build_player_caption(new_track, session.current_index, len(session.history))
+
+                old_msg_id = session.message_id or call.message.id
+                try:
+                    sent_msg = await self.bot.send_audio(
+                        chat_id=chat_id,
+                        audio=downloaded.audio_path,
+                        caption=caption,
+                        duration=new_track.duration,
+                        performer=new_track.artist,
+                        title=new_track.title,
+                        thumb=downloaded.cover_path if downloaded.cover_path and os.path.exists(downloaded.cover_path) else None,
+                        reply_markup=markup,
+                    )
+                    if sent_msg.audio:
+                        new_track.file_id = sent_msg.audio.file_id
+                    session.message_id = sent_msg.id
+                    try:
+                        await self.bot.delete_messages(chat_id, old_msg_id)
+                    except Exception:
+                        pass
+                except Exception as e:
+                    self.logger.error("Failed to send next player audio: %s", e)
+                finally:
+                    self.downloader.cleanup_files(downloaded.audio_path, downloaded.cover_path)
 
     # =========================================================================
     # Voting Flow (Like / Dislike)
