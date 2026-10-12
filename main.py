@@ -881,12 +881,18 @@ class OpenSongModule(BaseModule):
         # Pin message if enabled
         async with self.db.session_maker() as session:
             settings = await session.scalar(select(ChatSettings).where(ChatSettings.chat_id == chat_id))
-            if settings and settings.pin_song:
-                try:
-                    await self.bot.pin_chat_message(chat_id, sent_msg.id, disable_notification=True)
-                    self.logger.info("Pinned song message %s in chat %s", sent_msg.id, chat_id)
-                except Exception as pin_err:
-                    self.logger.warning("Could not pin song message in %s: %s", chat_id, pin_err)
+            if settings:
+                if settings.pin_song:
+                    try:
+                        await self.bot.pin_chat_message(chat_id, sent_msg.id, disable_notification=True)
+                        self.logger.info("Pinned song message %s in chat %s", sent_msg.id, chat_id)
+                    except Exception as pin_err:
+                        self.logger.warning("Could not pin song message in %s: %s", chat_id, pin_err)
+
+                # Restart the 24h cycle countdown from this publication moment
+                settings.last_sent_at = time.time()
+                settings.next_run_at = time.time() + (settings.interval_hours * 3600)
+                await session.commit()
 
         return sent_msg
 
