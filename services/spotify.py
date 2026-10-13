@@ -5,6 +5,7 @@ import random
 import re
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Set
+import urllib.parse
 import aiohttp
 
 logger = logging.getLogger(__name__)
@@ -20,32 +21,109 @@ class TrackInfo:
     genre: str
 
 
-# Multi-playlist pools per genre to guarantee large variety across hundreds/thousands of tracks
+# Rich subgenres for deep, diverse music discovery across decades (avoiding radio charts)
+GENRE_SUBGENRES: Dict[str, List[str]] = {
+    "pop": [
+        "80s synthpop", "90s pop classics", "city pop", "art pop",
+        "dream pop", "sophisti-pop", "indie pop gems", "french pop 80s",
+        "new wave pop", "chamber pop", "yacht rock pop"
+    ],
+    "rock": [
+        "classic rock 70s", "progressive rock", "post-punk", "grunge 90s",
+        "shoegaze", "psychedelic rock", "indie rock 2000s", "hard rock legends",
+        "krautrock", "noise rock", "alternative 90s", "blues rock"
+    ],
+    "electronic": [
+        "synthwave outrun", "90s idm", "trip-hop", "deep house classics",
+        "french touch", "ambient electronic", "downtempo chill", "breakbeat 90s",
+        "berlin techno", "electro swing", "drum and bass classics"
+    ],
+    "hip-hop": [
+        "90s golden era hip hop", "underground hip hop", "boom bap classics",
+        "conscious rap", "90s east coast hip hop", "2000s classic rap",
+        "jazz rap", "lo-fi hip hop chill", "southern hip hop 90s"
+    ],
+    "indie": [
+        "indie rock 2000s", "shoegaze essentials", "dream pop gems",
+        "post-punk revival", "lo-fi indie", "chamber pop", "midwest emo",
+        "indie folk classics", "math rock", "slowcore"
+    ],
+    "jazz": [
+        "hard bop jazz", "cool jazz classics", "blue note records", "modal jazz",
+        "jazz fusion", "vocal jazz standards", "spiritual jazz", "bebop classics"
+    ],
+    "metal": [
+        "heavy metal classics", "thrash metal legends", "doom metal",
+        "progressive metal", "90s alternative metal", "stoner rock",
+        "melodic death metal", "sludge metal", "power metal"
+    ],
+    "r-n-b": [
+        "90s r&b classics", "motown classics", "neo-soul essentials",
+        "classic soul 70s", "contemporary r&b slow jams", "funk classics 70s"
+    ],
+    "classical": [
+        "baroque masterpieces", "romantic era classical", "chopin nocturnes",
+        "orchestral masterpieces", "piano classics", "impressionist classical"
+    ],
+    "synthwave": [
+        "synthwave outrun", "retrowave essentials", "darksynth",
+        "cyberpunk synthwave", "dreamwave synth", "80s outrun electro"
+    ],
+    "blues": [
+        "delta blues", "chicago blues classics", "electric blues",
+        "texas blues legends", "blues rock 70s"
+    ],
+    "country": [
+        "outlaw country classics", "classic country 70s", "bluegrass essentials",
+        "americana roots", "alt-country"
+    ],
+    "folk": [
+        "indie folk", "60s folk revival", "acoustic folk classics",
+        "neo-folk", "traditional celtic folk"
+    ],
+    "reggae": [
+        "roots reggae classics", "dub reggae essentials", "rocksteady",
+        "ska classics", "lovers rock"
+    ],
+    "disco": [
+        "70s disco classics", "italo disco 80s", "nu-disco",
+        "funk disco essentials", "eurodisco"
+    ],
+    "ambient": [
+        "ambient soundscapes", "space ambient", "dark ambient",
+        "drone ambient", "relaxing ambient", "modular synth ambient"
+    ],
+    "lo-fi": [
+        "lofi hip hop beats", "chillhop study beats", "lofi jazz beats",
+        "relaxing lofi", "vintage lofi"
+    ],
+    "k-pop": [
+        "k-pop b-sides", "k-indie gems", "k-r&b essentials", "k-rock"
+    ],
+}
+
+# Curated classics & retro Spotify playlist pools (purged of commercial top-40 payola)
 GENRE_PLAYLISTS: Dict[str, List[str]] = {
     "pop": [
-        "37i9dQZF1DXcBWIGoYBM5M",  # Today's Top Hits
         "37i9dQZF1DX4UtSsGT1Sbe",  # All Out 80s
         "37i9dQZF1DXbTxeAdrVG2l",  # All Out 90s
-        "37i9dQZF1DXbYM3nMMSAfg",  # Pop Rising
-        "37i9dQZF1DX0b1W992W6fV",  # Hit Rewind
+        "37i9dQZF1DX4o1oenSJRJd",  # All Out 00s
+        "37i9dQZF1DWTE7dVYebp79",  # Synthpop
     ],
     "rock": [
         "37i9dQZF1DWXRqgorJj26U",  # Rock Classics
-        "37i9dQZF1DWZryfp6NSvtz",  # All New Rock
-        "37i9dQZF1DX1rVvRgjXZwF",  # 00s Rock Anthems
         "37i9dQZF1DX8FwnYE6PRS3",  # Modern Rock
         "37i9dQZF1DX3oM43CtKnRV",  # Hard Rock
+        "37i9dQZF1DX1rVvRgjXZwF",  # 00s Rock Anthems
     ],
     "electronic": [
-        "37i9dQZF1DX4dyzvuaRJ0n",  # mint
+        "37i9dQZF1DXdLEN7aqioXM",  # RetroWave / Synthwave
         "37i9dQZF1DX8tZsk68tuDw",  # Dance Rising
         "37i9dQZF1DX1T2fHl4Nxm8",  # Housewerk
-        "37i9dQZF1DXdLEN7aqioXM",  # RetroWave / Synthwave
     ],
     "hip-hop": [
-        "37i9dQZF1DX0XUsuxWHRQd",  # RapCaviar
-        "37i9dQZF1DX186v583rmzp",  # I Love My '90s Hip-Hop
         "37i9dQZF1DWVA1Gq4XHa6U",  # Gold School
+        "37i9dQZF1DX186v583rmzp",  # I Love My '90s Hip-Hop
         "37i9dQZF1DX2RxBh64g9LU",  # Hip-Hop Central
     ],
     "indie": [
@@ -97,7 +175,7 @@ GENRE_PLAYLISTS: Dict[str, List[str]] = {
     ],
 }
 
-SUPPORTED_GENRES = list(GENRE_PLAYLISTS.keys())
+SUPPORTED_GENRES = list(GENRE_SUBGENRES.keys())
 
 # Syllable / character wildcards for randomized Spotify search queries
 SEARCH_WILDCARDS = [
@@ -146,16 +224,24 @@ class SpotifyService:
         selected_genre = random.choice(valid_genres)
         exclude_set = {t.lower().strip() for t in exclude_titles} if exclude_titles else set()
 
-        # 1. Official Spotipy API with deep randomized search
+        # 1. Official Spotipy API with deep randomized search (if credentials provided)
         if self._sp_client:
             try:
                 track = await asyncio.to_thread(self._fetch_via_spotipy, selected_genre, exclude_set, max_duration)
                 if track:
                     return track
             except Exception as e:
-                logger.warning("OpenSong: Spotipy search failed: %s. Falling back to playlist pool.", e)
+                logger.warning("OpenSong: Spotipy search failed: %s. Falling back to Deezer subgenres.", e)
 
-        # 2. Public Spotify embed multi-playlist pool
+        # 2. Deep subgenre discovery via Deezer open catalog (90M+ tracks, no auth required, non-commercial)
+        try:
+            track = await self._fetch_via_deezer_subgenres(selected_genre, exclude_set, max_duration)
+            if track:
+                return track
+        except Exception as e:
+            logger.warning("OpenSong: Deezer subgenre fetch failed for genre %s: %s", selected_genre, e)
+
+        # 3. Curated classic Spotify embed playlist pool (fallback)
         try:
             track = await self._fetch_via_embed(selected_genre, exclude_set, max_duration)
             if track:
@@ -163,7 +249,14 @@ class SpotifyService:
         except Exception as e:
             logger.warning("OpenSong: Spotify playlist pool fetch failed for genre %s: %s", selected_genre, e)
 
-        # 3. Fallback from available pool ignoring exclude filter if pool exhausted
+        # 4. Fallback ignoring exclusion filter if pools exhausted
+        try:
+            track = await self._fetch_via_deezer_subgenres(selected_genre, set(), max_duration)
+            if track:
+                return track
+        except Exception:
+            pass
+
         try:
             track = await self._fetch_via_embed(selected_genre, set(), max_duration)
             if track:
@@ -173,15 +266,104 @@ class SpotifyService:
 
         return None
 
+    async def _fetch_via_deezer_subgenres(
+        self,
+        genre: str,
+        exclude_titles: Set[str],
+        max_duration: int = 600,
+    ) -> Optional[TrackInfo]:
+        """
+        Fetches tracks across rich subgenres via Deezer's open catalog (no auth required).
+        Queries subgenre enthusiast playlists to unearth deep cuts, underground gems, and authentic classics
+        instead of commercial Top-40 Billboard radio hits.
+        """
+        subgenres = list(GENRE_SUBGENRES.get(genre, [genre]))
+        random.shuffle(subgenres)
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+
+        async with aiohttp.ClientSession() as session:
+            for subgenre in subgenres[:3]:
+                url = f"https://api.deezer.com/search/playlist?q={urllib.parse.quote(subgenre)}&limit=15"
+                try:
+                    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                        if resp.status != 200:
+                            continue
+                        data = await resp.json(content_type=None)
+                        playlists = [p for p in data.get("data", []) if p.get("nb_tracks", 0) >= 5]
+                        if not playlists:
+                            continue
+
+                        random.shuffle(playlists)
+                        for pl in playlists[:2]:
+                            pl_id = pl.get("id")
+                            if not pl_id:
+                                continue
+                            pl_url = f"https://api.deezer.com/playlist/{pl_id}/tracks?limit=50"
+                            async with session.get(pl_url, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as tresp:
+                                if tresp.status != 200:
+                                    continue
+                                tdata = await tresp.json(content_type=None)
+                                tracks = tdata.get("data", [])
+                                if not tracks:
+                                    continue
+
+                                # Filter excluded tracks and check duration
+                                candidates = []
+                                for t in tracks:
+                                    name = (t.get("title") or t.get("title_short") or "").strip()
+                                    if not name:
+                                        continue
+                                    if exclude_titles and name.lower() in exclude_titles:
+                                        continue
+                                    dur = int(t.get("duration", 0))
+                                    if max_duration > 0 and dur > max_duration:
+                                        continue
+                                    candidates.append(t)
+
+                                if not candidates:
+                                    continue
+
+                                chosen = random.choice(candidates)
+                                title = chosen.get("title") or chosen.get("title_short") or "Unknown"
+                                artist = chosen.get("artist", {}).get("name", "Unknown")
+                                duration = int(chosen.get("duration", 180))
+                                album = chosen.get("album", {})
+                                cover_url = (
+                                    album.get("cover_xl")
+                                    or album.get("cover_big")
+                                    or album.get("cover_medium")
+                                    or album.get("cover")
+                                )
+                                spotify_url = f"https://open.spotify.com/search/{urllib.parse.quote(f'{artist} {title}')}"
+
+                                return TrackInfo(
+                                    title=title,
+                                    artist=artist,
+                                    duration=duration,
+                                    spotify_url=spotify_url,
+                                    cover_url=cover_url,
+                                    genre=genre,
+                                )
+                except Exception as e:
+                    logger.debug("Deezer subgenre fetch error for %s (%s): %s", genre, subgenre, e)
+                    continue
+
+        return None
+
     def _fetch_via_spotipy(self, genre: str, exclude_titles: Set[str], max_duration: int = 600) -> Optional[TrackInfo]:
         """Performs deep randomized searches using random seeds, years, and offsets."""
         random_seed = random.choice(SEARCH_WILDCARDS)
         random_year = random.randint(1975, 2024)
+        subgenre = random.choice(GENRE_SUBGENRES.get(genre, [genre]))
 
         query_strategies = [
-            f"{random_seed} genre:\"{genre}\" year:{random_year}",
-            f"{random_seed} genre:\"{genre}\"",
             f"genre:\"{genre}\" year:{random_year}",
+            f"\"{subgenre}\" year:{random_year}",
+            f"\"{subgenre}\"",
+            f"{random_seed} genre:\"{genre}\"",
             f"genre:\"{genre}\"",
         ]
 
@@ -196,6 +378,12 @@ class SpotifyService:
                     break
             except Exception:
                 continue
+
+        # Filter out tracks with excessive mainstream popularity (> 80) to avoid radio charts
+        if items:
+            non_mainstream = [i for i in items if i.get("popularity", 0) <= 80]
+            if non_mainstream:
+                items = non_mainstream
 
         # Filter out previously sent tracks and tracks exceeding duration limit
         if items and exclude_titles:
@@ -220,6 +408,10 @@ class SpotifyService:
                     target_danceability=random.uniform(0.2, 0.9)
                 )
                 items = rec_results.get("tracks", [])
+                if items:
+                    non_mainstream = [i for i in items if i.get("popularity", 0) <= 80]
+                    if non_mainstream:
+                        items = non_mainstream
                 if items and exclude_titles:
                     filtered = [i for i in items if i.get("name", "").lower().strip() not in exclude_titles]
                     if filtered:
