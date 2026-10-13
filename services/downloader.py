@@ -3,9 +3,10 @@ import logging
 import os
 import shutil
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Tuple
 import aiohttp
 import yt_dlp
+from yt_dlp.utils import DownloadError, ExtractorError
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ class YouTubeDownloader:
         """
         Searches and downloads the audio track from YouTube using yt-dlp.
         Runs asynchronously in a thread worker. Enforces max_duration limit.
+        Returns None on download error (e.g. HTTP 403 Forbidden, restricted video) so caller can skip and retry.
         """
         query = f"ytsearch1:{artist} - {title} audio"
         logger.info("OpenSong: Searching and downloading track via YouTube: %s", query)
@@ -53,11 +55,17 @@ class YouTubeDownloader:
                 yt_id=yt_id,
                 yt_url=f"https://www.youtube.com/watch?v={yt_id}" if yt_id else ""
             )
+        except (DownloadError, ExtractorError) as e:
+            logger.warning(
+                "OpenSong: YouTube download error for '%s - %s' (HTTP 403 Forbidden / restricted video): %s",
+                artist, title, e
+            )
+            return None
         except Exception as e:
-            logger.error("OpenSong: Error downloading audio for %s - %s: %s", artist, title, e, exc_info=True)
+            logger.error("OpenSong: Unexpected error downloading audio for %s - %s: %s", artist, title, e, exc_info=True)
             return None
 
-    def _run_ytdlp(self, query: str, max_duration: int = 600):
+    def _run_ytdlp(self, query: str, max_duration: int = 600) -> Optional[Tuple[str, int, str]]:
         outtmpl = os.path.join(self.temp_dir, "%(id)s.%(ext)s")
 
         def duration_filter(info_dict, *, incomplete):
@@ -77,33 +85,56 @@ class YouTubeDownloader:
             "noplaylist": True,
             "quiet": True,
             "no_warnings": True,
-            "default_search": "ytsearch1",
             "socket_timeout": 30,
             "match_filter": duration_filter,
+            "ignoreerrors": False,
         }
 
+        # Search top 2 candidates so if candidate 1 fails with HTTP 403, candidate 2 is attempted
+        search_query = query.replace("ytsearch1:", "ytsearch2:")
+        candidate_ids = []
+        try:
+            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "noplaylist": True, "extract_flat": True}) as search_ydl:
+                search_info = search_ydl.extract_info(search_query, download=False)
+                if search_info:
+                    entries = search_info.get("entries", [])
+                    candidate_ids = [e["id"] for e in entries if e and e.get("id")]
+        except Exception as e:
+            logger.debug("OpenSong: Flat search extraction error: %s", e)
+
+        if not candidate_ids:
+            candidate_ids = [query]
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(query, download=True)
-            if not info:
-                return None
+            for item in candidate_ids:
+                try:
+                    info = ydl.extract_info(item, download=True)
+                    if not info:
+                        continue
 
-            if "entries" in info and info["entries"]:
-                entry = info["entries"][0]
-            else:
-                entry = info
+                    if "entries" in info and info["entries"]:
+                        entry = info["entries"][0]
+                    else:
+                        entry = info
 
-            yt_id = entry.get("id", "song")
-            duration = int(entry.get("duration", 0) or 0)
-            target_mp3 = os.path.join(self.temp_dir, f"{yt_id}.mp3")
+                    yt_id = entry.get("id", "song")
+                    duration = int(entry.get("duration", 0) or 0)
+                    target_mp3 = os.path.join(self.temp_dir, f"{yt_id}.mp3")
 
-            if os.path.exists(target_mp3):
-                return target_mp3, duration, yt_id
+                    if os.path.exists(target_mp3):
+                        return target_mp3, duration, yt_id
 
-            # Fallback check
-            filename = ydl.prepare_filename(entry)
-            candidate_mp3 = os.path.splitext(filename)[0] + ".mp3"
-            if os.path.exists(candidate_mp3):
-                return candidate_mp3, duration, yt_id
+                    # Fallback check
+                    filename = ydl.prepare_filename(entry)
+                    candidate_mp3 = os.path.splitext(filename)[0] + ".mp3"
+                    if os.path.exists(candidate_mp3):
+                        return candidate_mp3, duration, yt_id
+                except (DownloadError, ExtractorError) as e:
+                    logger.warning("OpenSong: YouTube candidate '%s' download error (HTTP 403 / restricted): %s", item, e)
+                    continue
+                except Exception as e:
+                    logger.warning("OpenSong: Candidate '%s' unexpected error: %s", item, e)
+                    continue
 
         return None
 

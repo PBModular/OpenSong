@@ -5,7 +5,7 @@ import logging
 import math
 import os
 import time
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Dict, Tuple, Set
 
 from pyrogram import Client, errors, filters, enums
 from pyrogram.types import (
@@ -861,21 +861,13 @@ class OpenSongModule(BaseModule):
             genres = settings.get_genres_list()
             max_duration = getattr(settings, "max_duration_seconds", 600) or 600
 
-            track_info = await self.spotify.get_random_song(genres, max_duration=max_duration)
-            if not track_info:
-                try:
-                    await status_msg.edit_text(self.S["player"]["error"])
-                except Exception:
-                    pass
-                return
-
-            downloaded = await self.downloader.download_track(
-                title=track_info.title,
-                artist=track_info.artist,
-                cover_url=track_info.cover_url,
+            track_info, downloaded = await self._fetch_and_download_track(
+                genres=genres,
+                exclude_titles=None,
                 max_duration=max_duration,
+                max_attempts=5,
             )
-            if not downloaded or not os.path.exists(downloaded.audio_path):
+            if not track_info or not downloaded or not os.path.exists(downloaded.audio_path):
                 try:
                     await status_msg.edit_text(self.S["player"]["error"])
                 except Exception:
@@ -1112,20 +1104,13 @@ class OpenSongModule(BaseModule):
                 max_duration = getattr(settings, "max_duration_seconds", 600) or 600
 
                 exclude_titles = {t.title.lower().strip() for t in session.history}
-                track_info = await self.spotify.get_random_song(
-                    genres, exclude_titles=exclude_titles, max_duration=max_duration
-                )
-                if not track_info:
-                    await call.answer(self.S["player"]["error"], show_alert=True)
-                    return
-
-                downloaded = await self.downloader.download_track(
-                    title=track_info.title,
-                    artist=track_info.artist,
-                    cover_url=track_info.cover_url,
+                track_info, downloaded = await self._fetch_and_download_track(
+                    genres=genres,
+                    exclude_titles=exclude_titles,
                     max_duration=max_duration,
+                    max_attempts=5,
                 )
-                if not downloaded or not os.path.exists(downloaded.audio_path):
+                if not track_info or not downloaded or not os.path.exists(downloaded.audio_path):
                     await call.answer(self.S["player"]["error"], show_alert=True)
                     return
 
@@ -1385,6 +1370,58 @@ class OpenSongModule(BaseModule):
     # Core Flow: Song Fetch, Download & Send
     # =========================================================================
 
+    async def _fetch_and_download_track(
+        self,
+        genres: List[str],
+        exclude_titles: Optional[Set[str]] = None,
+        max_duration: int = 600,
+        max_attempts: int = 5,
+    ) -> Tuple[Optional[TrackInfo], Optional[DownloadedTrack]]:
+        """
+        Discovers a song and downloads its audio from YouTube.
+        If downloading fails (e.g. YouTube HTTP 403 Forbidden, geo-restricted, or yt-dlp error),
+        it automatically skips the track, adds it to the exclusion set, and tries with another song.
+        """
+        seen_excludes: Set[str] = set(exclude_titles) if exclude_titles else set()
+
+        for attempt in range(1, max_attempts + 1):
+            track_info = await self.spotify.get_random_song(
+                genres, exclude_titles=seen_excludes, max_duration=max_duration
+            )
+            if not track_info:
+                self.logger.warning("OpenSong: No track found for genres %s on attempt %d/%d", genres, attempt, max_attempts)
+                break
+
+            title_key = track_info.title.lower().strip()
+            seen_excludes.add(title_key)
+
+            self.logger.info(
+                "OpenSong: [Attempt %d/%d] Discovered '%s' by '%s' [%s]. Downloading...",
+                attempt,
+                max_attempts,
+                track_info.title,
+                track_info.artist,
+                track_info.genre,
+            )
+
+            downloaded = await self.downloader.download_track(
+                title=track_info.title,
+                artist=track_info.artist,
+                cover_url=track_info.cover_url,
+                max_duration=max_duration,
+            )
+
+            if downloaded and os.path.exists(downloaded.audio_path):
+                return track_info, downloaded
+
+            self.logger.warning(
+                "OpenSong: Failed to download '%s' by '%s' (e.g. HTTP 403 Forbidden / restricted). Skipping and trying another song...",
+                track_info.title,
+                track_info.artist,
+            )
+
+        return None, None
+
     async def _publish_song_to_chat(
         self,
         chat_id: int,
@@ -1507,31 +1544,15 @@ class OpenSongModule(BaseModule):
             except Exception as e:
                 self.logger.warning("Could not fetch recent post history for duplicate filtering: %s", e)
 
-            # 1. Search in Spotify with history exclusion and max_duration limit
-            track_info: Optional[TrackInfo] = await self.spotify.get_random_song(
-                genres, exclude_titles=exclude_titles, max_duration=max_duration
-            )
-            if not track_info:
-                self.logger.error("Could not obtain any song for genres: %s", genres)
-                return False, "spotify_failed"
-
-            self.logger.info(
-                "Selected song for chat %s: '%s' by '%s' [%s]",
-                chat_id,
-                track_info.title,
-                track_info.artist,
-                track_info.genre,
-            )
-
-            # 2. Download from YouTube with max_duration limit
-            downloaded: Optional[DownloadedTrack] = await self.downloader.download_track(
-                title=track_info.title,
-                artist=track_info.artist,
-                cover_url=track_info.cover_url,
+            # 1. Search in Spotify and download from YouTube with automatic skip & retry on 403 Forbidden
+            track_info, downloaded = await self._fetch_and_download_track(
+                genres=genres,
+                exclude_titles=exclude_titles,
                 max_duration=max_duration,
+                max_attempts=5,
             )
-            if not downloaded or not os.path.exists(downloaded.audio_path):
-                self.logger.error("Failed to download YouTube audio for %s - %s", track_info.artist, track_info.title)
+            if not track_info or not downloaded or not os.path.exists(downloaded.audio_path):
+                self.logger.error("Could not obtain and download any song for chat %s after retries", chat_id)
                 return False, "download_failed"
 
             duration = downloaded.duration or track_info.duration
