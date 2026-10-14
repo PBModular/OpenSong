@@ -30,14 +30,17 @@ class YouTubeDownloader:
     ) -> Optional[DownloadedTrack]:
         """
         Searches and downloads the audio track from YouTube using yt-dlp.
-        Runs asynchronously in a thread worker. Enforces max_duration limit.
-        Returns None on download error (e.g. HTTP 403 Forbidden, restricted video) so caller can skip and retry.
+        Runs asynchronously in a thread worker with a 45s hard timeout. Enforces max_duration limit.
+        Returns None on download error (HTTP 403 Forbidden, live stream, timeout) so caller can skip and retry.
         """
         query = f"ytsearch1:{artist} - {title} audio"
         logger.info("OpenSong: Searching and downloading track via YouTube: %s", query)
 
         try:
-            download_result = await asyncio.to_thread(self._run_ytdlp, query, max_duration)
+            download_result = await asyncio.wait_for(
+                asyncio.to_thread(self._run_ytdlp, query, max_duration),
+                timeout=45.0,
+            )
             if not download_result:
                 return None
 
@@ -55,6 +58,12 @@ class YouTubeDownloader:
                 yt_id=yt_id,
                 yt_url=f"https://www.youtube.com/watch?v={yt_id}" if yt_id else ""
             )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "OpenSong: YouTube download timed out (> 45s) for '%s - %s'. Skipping...",
+                artist, title
+            )
+            return None
         except (DownloadError, ExtractorError) as e:
             logger.warning(
                 "OpenSong: YouTube download error for '%s - %s' (HTTP 403 Forbidden / restricted video): %s",
@@ -68,10 +77,23 @@ class YouTubeDownloader:
     def _run_ytdlp(self, query: str, max_duration: int = 600) -> Optional[Tuple[str, int, str]]:
         outtmpl = os.path.join(self.temp_dir, "%(id)s.%(ext)s")
 
-        def duration_filter(info_dict, *, incomplete):
+        def video_filter(info_dict, *, incomplete):
+            # Strictly reject live streams and upcoming premieres (prevents infinite ffmpeg download hangs)
+            if info_dict.get("is_live") or info_dict.get("was_live"):
+                return "Video is a live stream"
+            if info_dict.get("live_status") in ("is_live", "post_live", "is_upcoming"):
+                return "Video is live or upcoming premiere"
+
             dur = info_dict.get("duration")
-            if dur and max_duration > 0 and dur > max_duration:
-                return f"Duration {dur}s exceeds maximum limit of {max_duration}s"
+            if not incomplete and dur is None:
+                return "Video has no duration (likely live stream)"
+            if dur is not None:
+                if dur <= 0:
+                    return "Invalid video duration"
+                if max_duration > 0 and dur > max_duration:
+                    return f"Duration {dur}s exceeds maximum limit of {max_duration}s"
+                if dur < 25:
+                    return f"Duration {dur}s is too short"
             return None
 
         ydl_opts = {
@@ -85,31 +107,67 @@ class YouTubeDownloader:
             "noplaylist": True,
             "quiet": True,
             "no_warnings": True,
-            "socket_timeout": 30,
-            "match_filter": duration_filter,
+            "socket_timeout": 15,
+            "retries": 2,
+            "fragment_retries": 2,
+            "match_filter": video_filter,
             "ignoreerrors": False,
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["android", "web"],
+                }
+            },
         }
 
-        # Search top 2 candidates so if candidate 1 fails with HTTP 403, candidate 2 is attempted
-        search_query = query.replace("ytsearch1:", "ytsearch2:")
+        # Search top 5 candidates to find actual songs rather than 3-hour DJ sets or live streams
+        search_query = query.replace("ytsearch1:", "ytsearch5:")
         candidate_ids = []
         try:
-            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "noplaylist": True, "extract_flat": True}) as search_ydl:
+            search_opts = {
+                "quiet": True,
+                "no_warnings": True,
+                "noplaylist": True,
+                "extract_flat": True,
+                "socket_timeout": 15,
+            }
+            with yt_dlp.YoutubeDL(search_opts) as search_ydl:
                 search_info = search_ydl.extract_info(search_query, download=False)
                 if search_info:
                     entries = search_info.get("entries", [])
-                    candidate_ids = [e["id"] for e in entries if e and e.get("id")]
+                    for e in entries:
+                        if not e or not e.get("id"):
+                            continue
+                        # Skip live streams
+                        if e.get("is_live") or e.get("live_status") in ("is_live", "post_live", "is_upcoming"):
+                            continue
+                        title_lower = (e.get("title") or "").lower()
+                        if "24/7" in title_lower or "live stream" in title_lower:
+                            continue
+                        # Duration filtering in flat search
+                        dur = e.get("duration")
+                        if dur is None:
+                            continue
+                        if max_duration > 0 and dur > max_duration:
+                            continue
+                        if dur < 25:
+                            continue
+                        candidate_ids.append(e["id"])
+                        if len(candidate_ids) >= 3:
+                            break
         except Exception as e:
             logger.debug("OpenSong: Flat search extraction error: %s", e)
 
+        # If all search candidates were rejected (live streams, multi-hour sets), bail early
         if not candidate_ids:
-            candidate_ids = [query]
+            logger.info("OpenSong: No suitable video candidate found for query: %s", query)
+            return None
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             for item in candidate_ids:
+                video_url = f"https://www.youtube.com/watch?v={item}"
                 try:
-                    info = ydl.extract_info(item, download=True)
-                    if not info:
+                    info = ydl.extract_info(video_url, download=True)
+                    if not info or not info.get("requested_downloads"):
                         continue
 
                     if "entries" in info and info["entries"]:

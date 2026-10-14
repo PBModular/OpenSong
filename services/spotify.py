@@ -34,9 +34,9 @@ GENRE_SUBGENRES: Dict[str, List[str]] = {
         "krautrock", "noise rock", "alternative 90s", "blues rock"
     ],
     "electronic": [
-        "synthwave outrun", "90s idm", "trip-hop", "deep house classics",
+        "synthwave outrun", "90s idm", "trip-hop", "classic deep house",
         "french touch", "ambient electronic", "downtempo chill", "breakbeat 90s",
-        "berlin techno", "electro swing", "drum and bass classics"
+        "berlin techno", "electro swing", "classic drum and bass"
     ],
     "hip-hop": [
         "90s golden era hip hop", "underground hip hop", "boom bap classics",
