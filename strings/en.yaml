@@ -103,6 +103,9 @@ approval:
   approved: "<b>Approved by @{user}.</b> Song published to <b>{chat_title}</b>."
   rejected: "<b>Rejected by @{user}.</b> Song discarded."
   rerolling: "Searching for another track..."
+  rerolling_toast: "Searching for another song... You can still approve this one!"
+  reroll_in_progress: "Search already in progress, please wait..."
+  already_resolved: "This request is no longer active (already approved or superseded)."
   not_approver: "Only @{approver} can decide on this song."
 
 actions:

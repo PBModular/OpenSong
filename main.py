@@ -1292,7 +1292,14 @@ class OpenSongModule(BaseModule):
                 select(PendingApproval).where(PendingApproval.id == approval_id)
             )
             if not pending or pending.status != "pending":
-                await call.answer("Approval request already resolved or expired.", show_alert=True)
+                await call.answer(
+                    self.S["approval"].get("already_resolved", "Approval request already resolved or expired."),
+                    show_alert=True,
+                )
+                try:
+                    await call.message.edit_reply_markup(reply_markup=None)
+                except Exception:
+                    pass
                 return
 
             # Verify that clicker is the designated approver or bot owner
@@ -1320,6 +1327,29 @@ class OpenSongModule(BaseModule):
 
             if action == "approve":
                 pending.status = "approved"
+
+                # Supersede and clean up all other pending approval requests for this chat
+                other_pendings = (await session.scalars(
+                    select(PendingApproval).where(
+                        PendingApproval.chat_id == chat_id,
+                        PendingApproval.status == "pending",
+                        PendingApproval.id != approval_id,
+                    )
+                )).all()
+
+                for other in other_pendings:
+                    other.status = "superseded"
+                    if other.dm_message_id and user.id:
+                        try:
+                            await client.edit_message_reply_markup(
+                                chat_id=user.id,
+                                message_id=other.dm_message_id,
+                                reply_markup=None,
+                            )
+                        except Exception:
+                            pass
+                    self.downloader.cleanup_files(other.audio_path, other.cover_path)
+
                 await session.commit()
                 await call.answer()
 
@@ -1335,13 +1365,18 @@ class OpenSongModule(BaseModule):
                     cover_path=pending.cover_path,
                 )
 
-                # Edit DM message
+                # Edit DM message caption and remove buttons
                 approver_name = user.username or user.first_name
-                await call.message.edit_text(
-                    self.S["approval"]["approved"].format(user=approver_name, chat_title=chat_title)
-                )
+                approved_text = self.S["approval"]["approved"].format(user=approver_name, chat_title=chat_title)
+                try:
+                    await call.message.edit_caption(caption=approved_text, reply_markup=None)
+                except Exception:
+                    try:
+                        await call.message.edit_reply_markup(reply_markup=None)
+                    except Exception:
+                        pass
 
-                # Clean up files
+                # Clean up approved audio and cover files
                 self.downloader.cleanup_files(pending.audio_path, pending.cover_path)
 
             elif action == "reject":
@@ -1350,20 +1385,33 @@ class OpenSongModule(BaseModule):
                 await call.answer()
 
                 approver_name = user.username or user.first_name
-                await call.message.edit_text(
-                    self.S["approval"]["rejected"].format(user=approver_name)
-                )
+                rejected_text = self.S["approval"]["rejected"].format(user=approver_name)
+                try:
+                    await call.message.edit_caption(caption=rejected_text, reply_markup=None)
+                except Exception:
+                    try:
+                        await call.message.edit_reply_markup(reply_markup=None)
+                    except Exception:
+                        pass
                 self.downloader.cleanup_files(pending.audio_path, pending.cover_path)
 
             elif action == "reroll":
-                pending.status = "rerolled"
-                await session.commit()
-                await call.answer()
+                # Check if search is already in progress
+                lock = self._get_chat_lock(chat_id)
+                if lock.locked():
+                    await call.answer(
+                        self.S["approval"].get("reroll_in_progress", "Search already in progress, please wait..."),
+                        show_alert=False,
+                    )
+                    return
 
-                await call.message.edit_text(self.S["approval"]["rerolling"])
-                self.downloader.cleanup_files(pending.audio_path, pending.cover_path)
+                # Leave buttons and audio intact so user can still approve this track if desired
+                toast_msg = self.S["approval"].get(
+                    "rerolling_toast", "Searching for another song... You can still approve this one!"
+                )
+                await call.answer(toast_msg, show_alert=False)
 
-                # Fetch and prepare a new song for approval
+                # Launch search and download for a new song
                 asyncio.create_task(self.process_song_send(chat_id))
 
     # =========================================================================
@@ -1530,7 +1578,7 @@ class OpenSongModule(BaseModule):
             genres = settings.get_genres_list()
             max_duration = getattr(settings, "max_duration_seconds", 600) or 600
 
-            # Query recently posted songs in this chat (last 60 days) to avoid repeats
+            # Query recently posted songs in this chat (last 60 days) and currently pending approvals
             exclude_titles = set()
             try:
                 async with self.db.session_maker() as session:
@@ -1541,6 +1589,16 @@ class OpenSongModule(BaseModule):
                         )
                     )
                     exclude_titles = {t.lower().strip() for t in recent_posts.all() if t}
+
+                    pending_approvals = await session.scalars(
+                        select(PendingApproval.title).where(
+                            PendingApproval.chat_id == chat_id,
+                            PendingApproval.status == "pending",
+                        )
+                    )
+                    for t in pending_approvals.all():
+                        if t:
+                            exclude_titles.add(t.lower().strip())
             except Exception as e:
                 self.logger.warning("Could not fetch recent post history for duplicate filtering: %s", e)
 
